@@ -22,7 +22,8 @@ import {
 import {
   INITIAL_TIMETABLE_ENTRIES,
   normalizeClassForTimeTable,
-  DEFAULT_EXAM_NOTES
+  DEFAULT_EXAM_NOTES,
+  DEFAULT_TIMETABLE_SUBJECTS
 } from '../utils/timetableUtils';
 
 interface SchoolContextType {
@@ -142,10 +143,18 @@ interface SchoolContextType {
   timeTableEntries: ExamTimeTableEntry[];
   saveTimeTableEntry: (entry: ExamTimeTableEntry) => { success: boolean };
   deleteTimeTableEntry: (id: string) => { success: boolean };
+  resetTimeTableToDefault: () => void;
   getTimeTableForExam: (exam: string, session: string) => ExamTimeTableEntry[];
   getSubjectForClassAndDate: (exam: string, session: string, date: string, className: string) => string;
   examNotes: string[];
   updateExamNotes: (notes: string[]) => void;
+
+  // Custom Subjects Management
+  subjectList: string[];
+  addSubject: (name: string) => { success: boolean; message?: string };
+  editSubject: (oldName: string, newName: string) => { success: boolean; message?: string };
+  deleteSubject: (name: string) => { success: boolean; message?: string };
+  resetSubjectList: () => void;
 
   // Activity Log
   activityLogs: ActivityLog[];
@@ -182,7 +191,8 @@ const STORAGE_KEYS = {
   ATTENDANCE: 'sm_attendance',
   ACTIVITY_LOGS: 'sm_activity_logs',
   TIMETABLE: 'sm_timetable_entries',
-  EXAM_NOTES: 'sm_exam_notes'
+  EXAM_NOTES: 'sm_exam_notes',
+  SUBJECTS: 'sm_subject_list'
 };
 
 export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -314,6 +324,20 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return DEFAULT_EXAM_NOTES;
   });
 
+  // 11. Subjects List (for Exam Time Table & Attendance)
+  const [subjectList, setSubjectList] = useState<string[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.SUBJECTS);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {
+        console.error("Failed to parse subject list", e);
+      }
+    }
+    return DEFAULT_TIMETABLE_SUBJECTS;
+  });
+
   // Persistence hooks
   useEffect(() => {
     if (adminUser) {
@@ -358,6 +382,10 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.EXAM_NOTES, JSON.stringify(examNotes));
   }, [examNotes]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(subjectList));
+  }, [subjectList]);
 
   // Activity logger
   const logActivity = (action: string, studentId?: string, className?: string, details?: string) => {
@@ -1481,6 +1509,62 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setExamNotes(notes);
   };
 
+  const resetTimeTableToDefault = () => {
+    setTimeTableEntries(INITIAL_TIMETABLE_ENTRIES);
+    setExamNotes(DEFAULT_EXAM_NOTES);
+    logActivity('TIMETABLE_RESET_DEFAULT', '', '', 'Reset to Official Schedule (19-09 to 25-09-2025)');
+  };
+
+  // Custom Subjects Management
+  const addSubject = (name: string): { success: boolean; message?: string } => {
+    const trimmed = name.trim().toUpperCase();
+    if (!trimmed) return { success: false, message: 'विषय का नाम खाली नहीं हो सकता (Subject name cannot be empty).' };
+    if (subjectList.includes(trimmed)) {
+      return { success: false, message: `विषय "${trimmed}" पहले से सूची में मौजूद है (Subject already exists).` };
+    }
+    setSubjectList(prev => [...prev, trimmed]);
+    logActivity('SUBJECT_ADDED', '', '', `Added subject: ${trimmed}`);
+    return { success: true };
+  };
+
+  const editSubject = (oldName: string, newName: string): { success: boolean; message?: string } => {
+    const trimmedOld = oldName.trim().toUpperCase();
+    const trimmedNew = newName.trim().toUpperCase();
+    if (!trimmedNew) return { success: false, message: 'विषय का नया नाम खाली नहीं हो सकता.' };
+    if (trimmedOld !== trimmedNew && subjectList.includes(trimmedNew)) {
+      return { success: false, message: `विषय "${trimmedNew}" पहले से मौजूद है.` };
+    }
+    setSubjectList(prev => prev.map(s => (s === trimmedOld ? trimmedNew : s)));
+    // Also update all timetable entries containing this subject
+    setTimeTableEntries(prev =>
+      prev.map(entry => {
+        let changed = false;
+        const newClassSubjects = { ...entry.classSubjects };
+        Object.keys(newClassSubjects).forEach(cls => {
+          if (newClassSubjects[cls] === trimmedOld) {
+            newClassSubjects[cls] = trimmedNew;
+            changed = true;
+          }
+        });
+        return changed ? { ...entry, classSubjects: newClassSubjects } : entry;
+      })
+    );
+    logActivity('SUBJECT_EDITED', '', '', `Renamed subject "${trimmedOld}" to "${trimmedNew}"`);
+    return { success: true };
+  };
+
+  const deleteSubject = (name: string): { success: boolean; message?: string } => {
+    const trimmed = name.trim().toUpperCase();
+    setSubjectList(prev => prev.filter(s => s !== trimmed));
+    logActivity('SUBJECT_DELETED', '', '', `Removed subject: ${trimmed}`);
+    return { success: true };
+  };
+
+  const resetSubjectList = () => {
+    setSubjectList(DEFAULT_TIMETABLE_SUBJECTS);
+    logActivity('SUBJECT_LIST_RESET', '', '', 'Reset subject list to defaults.');
+  };
+
   // Reset to default
   const resetToDefaults = () => {
     setStudents(INITIAL_STUDENTS);
@@ -1577,10 +1661,16 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         timeTableEntries,
         saveTimeTableEntry,
         deleteTimeTableEntry,
+        resetTimeTableToDefault,
         getTimeTableForExam,
         getSubjectForClassAndDate,
         examNotes,
         updateExamNotes,
+        subjectList,
+        addSubject,
+        editSubject,
+        deleteSubject,
+        resetSubjectList,
         activityLogs,
         logActivity,
         resetToDefaults,

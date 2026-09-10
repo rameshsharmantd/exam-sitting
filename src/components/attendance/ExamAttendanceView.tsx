@@ -18,7 +18,12 @@ import {
 import { useSchool } from '../../context/SchoolContext';
 import { CONFIG } from '../../data/constants';
 import { HeaderPrint } from '../common/HeaderPrint';
-import { normalizeClassForTimeTable, TIMETABLE_CLASSES, getDayNameWithHindi } from '../../utils/timetableUtils';
+import {
+  normalizeClassForTimeTable,
+  TIMETABLE_CLASSES,
+  getDayNameWithHindi,
+  formatDisplayDate
+} from '../../utils/timetableUtils';
 
 export const ExamAttendanceView: React.FC = () => {
   const {
@@ -28,7 +33,8 @@ export const ExamAttendanceView: React.FC = () => {
     attendanceRecords,
     clearAttendanceRecords,
     timeTableEntries,
-    getSubjectForClassAndDate
+    getSubjectForClassAndDate,
+    subjectList
   } = useSchool();
 
   const [exam, setExam] = useState(settings.defaultExam);
@@ -343,7 +349,7 @@ export const ExamAttendanceView: React.FC = () => {
                     ) : (
                       examDates.map(d => (
                         <option key={d.id} value={d.date}>
-                          📅 {d.date} ({d.day}) • {d.time}
+                          📅 {formatDisplayDate(d.date)} ({d.day}) • {d.time}
                         </option>
                       ))
                     )}
@@ -356,7 +362,7 @@ export const ExamAttendanceView: React.FC = () => {
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between text-[11px] font-bold text-blue-900">
                     <span>
-                      Class-Wise Auto Subjects for <strong>{activeDateEntry.date} ({activeDateEntry.day})</strong>:
+                      Class-Wise Auto Subjects for <strong>{formatDisplayDate(activeDateEntry.date)} ({activeDateEntry.day})</strong>:
                     </span>
                     <span className="text-[10px] text-blue-700 font-semibold">
                       Time: {activeDateEntry.time}
@@ -404,7 +410,7 @@ export const ExamAttendanceView: React.FC = () => {
                 className="w-full sm:w-80 px-3 py-2 text-xs rounded-xl border border-slate-300 bg-white font-bold focus:outline-none focus:border-blue-600"
               />
               <datalist id="subject-list">
-                {CONFIG.COMMON_SUBJECTS.map(sub => (
+                {subjectList.map(sub => (
                   <option key={sub} value={sub} />
                 ))}
               </datalist>
@@ -557,7 +563,7 @@ export const ExamAttendanceView: React.FC = () => {
                     <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-blue-200">
                       <div className="flex items-center gap-1 font-mono font-bold">
                         <Calendar className="w-3.5 h-3.5" />
-                        <span>दिनांक (Date): {group.date} {group.day ? `(${group.day})` : ''}</span>
+                        <span>दिनांक (Date): {formatDisplayDate(group.date)} {group.day ? `(${group.day})` : ''}</span>
                       </div>
                       <span>•</span>
                       <span>कक्षाएं (Classes): {group.classes.join(', ')}</span>

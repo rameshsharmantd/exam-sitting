@@ -99,7 +99,13 @@ export function normalizeClassForTimeTable(className: string): string {
 export function getDayNameWithHindi(dateString: string): string {
   if (!dateString) return '';
   try {
-    const d = new Date(dateString + 'T00:00:00');
+    // Handle DD-MM-YYYY or YYYY-MM-DD
+    let parseable = dateString;
+    if (/^\d{2}-\d{2}-\d{4}$/.test(dateString)) {
+      const [dd, mm, yyyy] = dateString.split('-');
+      parseable = `${yyyy}-${mm}-${dd}`;
+    }
+    const d = new Date(parseable + 'T00:00:00');
     if (isNaN(d.getTime())) return '';
     const dayIndex = d.getDay();
     const days = [
@@ -117,6 +123,15 @@ export function getDayNameWithHindi(dateString: string): string {
   }
 }
 
+export function formatDisplayDate(dateString: string): string {
+  if (!dateString) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+    const [yyyy, mm, dd] = dateString.split('-');
+    return `${dd}-${mm}-${yyyy}`;
+  }
+  return dateString;
+}
+
 export const DEFAULT_EXAM_NOTES: string[] = [
   'सभी परीक्षार्थी परीक्षा प्रारंभ होने से 15 मिनट पूर्व अपने निर्धारित परीक्षा कक्ष में अनिवार्य रूप से उपस्थित हों।',
   'प्रत्येक विद्यार्थी के पास अपना प्रवेश पत्र (Admit Card) व आवश्यक स्टेशनरी (पेन, पेंसिल, इरेज़र आदि) होना अनिवार्य है।',
@@ -130,115 +145,164 @@ export const INITIAL_TIMETABLE_ENTRIES: ExamTimeTableEntry[] = [
     id: 'tt-entry-01',
     exam: CONFIG.DEFAULT_EXAM,
     session: CONFIG.DEFAULT_SESSION,
-    date: '2026-03-16',
-    day: 'Monday',
+    date: '2025-09-19',
+    day: 'FRIDAY',
     time: '09:00 AM - 12:00 PM',
     classSubjects: {
-      NUR: 'English Rhymes & Oral',
-      LKG: 'English Written',
-      UKG: 'English Written',
-      I: 'Hindi',
-      II: 'Hindi',
-      III: 'Hindi',
-      IV: 'Hindi',
-      V: 'Hindi',
-      VI: 'English',
-      VII: 'English',
-      VIII: 'English',
-      IX: 'Social Science',
-      X: 'Mathematics'
+      NUR: 'ENGLISH ORAL & RHYMES',
+      LKG: 'ENGLISH WRITTEN',
+      UKG: 'ENGLISH WRITTEN',
+      I: 'ENGLISH',
+      II: 'ENGLISH',
+      III: 'ENGLISH',
+      IV: 'ENGLISH',
+      V: 'ENGLISH',
+      VI: 'ENGLISH',
+      VII: 'SCIENCE',
+      VIII: 'SCIENCE',
+      IX: 'SOCIAL SCIENCE',
+      X: 'MATH'
     }
   },
   {
     id: 'tt-entry-02',
     exam: CONFIG.DEFAULT_EXAM,
     session: CONFIG.DEFAULT_SESSION,
-    date: '2026-03-18',
-    day: 'Wednesday',
+    date: '2025-09-20',
+    day: 'SATURDAY',
     time: '09:00 AM - 12:00 PM',
     classSubjects: {
-      NUR: 'Hindi Rhymes & Oral',
-      LKG: 'Hindi Written',
-      UKG: 'Hindi Written',
-      I: 'English',
-      II: 'English',
-      III: 'English',
-      IV: 'English',
-      V: 'English',
-      VI: 'Mathematics',
-      VII: 'Mathematics',
-      VIII: 'Mathematics',
-      IX: 'Science',
-      X: 'Social Science'
+      NUR: 'HINDI ORAL & RHYMES',
+      LKG: 'HINDI WRITTEN',
+      UKG: 'HINDI WRITTEN',
+      I: 'HINDI',
+      II: 'HINDI',
+      III: 'HINDI',
+      IV: 'HINDI',
+      V: 'HINDI',
+      VI: 'SCIENCE',
+      VII: 'ENGLISH',
+      VIII: 'ENGLISH',
+      IX: 'ENGLISH',
+      X: 'HINDI'
     }
   },
   {
     id: 'tt-entry-03',
     exam: CONFIG.DEFAULT_EXAM,
     session: CONFIG.DEFAULT_SESSION,
-    date: '2026-03-20',
-    day: 'Friday',
+    date: '2025-09-22',
+    day: 'MONDAY',
     time: '09:00 AM - 12:00 PM',
     classSubjects: {
-      NUR: 'Number Work & Oral',
-      LKG: 'Mathematics',
-      UKG: 'Mathematics',
-      I: 'Mathematics',
-      II: 'Mathematics',
-      III: 'Mathematics',
-      IV: 'Mathematics',
-      V: 'Mathematics',
-      VI: 'Science',
-      VII: 'Science',
-      VIII: 'Science',
-      IX: 'Mathematics',
-      X: 'Science'
+      NUR: 'MATH ORAL',
+      LKG: 'MATHEMATICS',
+      UKG: 'MATHEMATICS',
+      I: 'MATH',
+      II: 'MATH',
+      III: 'MATH',
+      IV: 'MATH',
+      V: 'MATH',
+      VI: 'SOCIAL SCIENCE',
+      VII: 'MATH',
+      VIII: 'MATH',
+      IX: 'MATH',
+      X: 'SCIENCE'
     }
   },
   {
     id: 'tt-entry-04',
     exam: CONFIG.DEFAULT_EXAM,
     session: CONFIG.DEFAULT_SESSION,
-    date: '2026-03-23',
-    day: 'Monday',
+    date: '2025-09-23',
+    day: 'TUESDAY',
     time: '09:00 AM - 12:00 PM',
     classSubjects: {
-      NUR: 'Drawing & Colouring',
-      LKG: 'Drawing & Colouring',
-      UKG: 'Drawing & EVS',
-      I: 'EVS / Drawing',
-      II: 'EVS / Drawing',
-      III: 'Environmental Studies',
-      IV: 'Environmental Studies',
-      V: 'Environmental Studies',
-      VI: 'Social Science',
-      VII: 'Social Science',
-      VIII: 'Social Science',
-      IX: 'Hindi Course-A',
-      X: 'English Language'
+      NUR: 'DRAWING & COLOURING',
+      LKG: 'DRAWING & COLOURING',
+      UKG: 'DRAWING & EVS',
+      I: 'EVS',
+      II: 'EVS',
+      III: 'EVS',
+      IV: 'EVS',
+      V: 'EVS',
+      VI: 'HINDI',
+      VII: 'HINDI',
+      VIII: 'HINDI',
+      IX: 'HINDI',
+      X: 'ENGLISH'
     }
   },
   {
     id: 'tt-entry-05',
     exam: CONFIG.DEFAULT_EXAM,
     session: CONFIG.DEFAULT_SESSION,
-    date: '2026-03-25',
-    day: 'Wednesday',
+    date: '2025-09-24',
+    day: 'WEDNESDAY',
     time: '09:00 AM - 12:00 PM',
     classSubjects: {
-      NUR: 'General Knowledge & Conversation',
-      LKG: 'General Knowledge',
-      UKG: 'General Knowledge',
-      I: 'Computer / GK',
-      II: 'Computer / GK',
-      III: 'Computer Applications',
-      IV: 'Computer Applications',
-      V: 'Computer Applications',
-      VI: 'Sanskrit / Hindi',
-      VII: 'Sanskrit / Hindi',
-      VIII: 'Sanskrit / Hindi',
-      IX: 'English Language',
-      X: 'Hindi Course-A'
+      NUR: 'CONVERSATION & GK',
+      LKG: 'GK & ORAL',
+      UKG: 'GK & CONVERSATION',
+      I: 'COMPUTER',
+      II: 'COMPUTER',
+      III: 'SOCIAL SCIENCE',
+      IV: 'SOCIAL SCIENCE',
+      V: 'SOCIAL SCIENCE',
+      VI: 'MATH',
+      VII: 'SOCIAL SCIENCE',
+      VIII: 'SOCIAL SCIENCE',
+      IX: 'SCIENCE',
+      X: 'SOCIAL SCIENCE'
+    }
+  },
+  {
+    id: 'tt-entry-06',
+    exam: CONFIG.DEFAULT_EXAM,
+    session: CONFIG.DEFAULT_SESSION,
+    date: '2025-09-25',
+    day: 'THURSDAY',
+    time: '09:00 AM - 12:00 PM',
+    classSubjects: {
+      NUR: 'ACTIVITY',
+      LKG: 'ACTIVITY',
+      UKG: 'ACTIVITY',
+      I: 'DRAWING',
+      II: 'DRAWING',
+      III: 'COMPUTER',
+      IV: 'COMPUTER',
+      V: 'COMPUTER',
+      VI: 'COMPUTER',
+      VII: 'COMPUTER',
+      VIII: 'COMPUTER',
+      IX: 'COMPUTER',
+      X: 'COMPUTER'
     }
   }
+];
+
+export const DEFAULT_TIMETABLE_SUBJECTS: string[] = [
+  'ENGLISH',
+  'HINDI',
+  'MATH',
+  'SCIENCE',
+  'SOCIAL SCIENCE',
+  'COMPUTER',
+  'SANSKRIT',
+  'EVS',
+  'DRAWING',
+  'GENERAL KNOWLEDGE',
+  'ENGLISH WRITTEN',
+  'ENGLISH ORAL & RHYMES',
+  'HINDI WRITTEN',
+  'HINDI ORAL & RHYMES',
+  'MATH ORAL',
+  'CONVERSATION & GK',
+  'GK & ORAL',
+  'GK & CONVERSATION',
+  'MORAL SCIENCE',
+  'PHYSICAL EDUCATION',
+  'ART & CRAFT',
+  'ACTIVITY',
+  'URDU'
 ];

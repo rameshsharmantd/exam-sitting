@@ -14,7 +14,12 @@ import {
   Sparkles,
   Save,
   RotateCcw,
-  Check
+  Check,
+  Settings2,
+  X,
+  ChevronDown,
+  Tag,
+  ListFilter
 } from 'lucide-react';
 import { useSchool } from '../../context/SchoolContext';
 import { ExamTimeTableEntry, ActiveSection } from '../../types';
@@ -23,7 +28,9 @@ import {
   TIMETABLE_CLASSES,
   TIMETABLE_GROUPS,
   TimeTableGroupId,
-  getDayNameWithHindi
+  getDayNameWithHindi,
+  formatDisplayDate,
+  INITIAL_TIMETABLE_ENTRIES
 } from '../../utils/timetableUtils';
 import { CONFIG } from '../../data/constants';
 
@@ -37,17 +44,29 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
     timeTableEntries,
     saveTimeTableEntry,
     deleteTimeTableEntry,
+    resetTimeTableToDefault,
     examNotes,
-    updateExamNotes
+    updateExamNotes,
+    subjectList,
+    addSubject,
+    editSubject,
+    deleteSubject,
+    resetSubjectList
   } = useSchool();
 
   const [exam, setExam] = useState<string>(settings.defaultExam);
   const [session, setSession] = useState<string>(settings.defaultSession);
-  const [selectedGroup, setSelectedGroup] = useState<TimeTableGroupId>('ALL');
 
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Print Modal State
+  // Subject Management State (विषय जोड़ें और संपादित करें)
+  const [isSubjectManagerOpen, setIsSubjectManagerOpen] = useState(false);
+  const [newSubjectName, setNewSubjectName] = useState('');
+  const [editingSubjectOldName, setEditingSubjectOldName] = useState<string | null>(null);
+  const [editingSubjectNewName, setEditingSubjectNewName] = useState('');
+  const [subjectFeedback, setSubjectFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Print Modal State (Groups are exclusively for print)
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [printGroup, setPrintGroup] = useState<TimeTableGroupId>('ALL');
   const [editingNotes, setEditingNotes] = useState<string[]>([...examNotes]);
@@ -65,10 +84,15 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
   function getStandardDay(dateStr: string): string {
     if (!dateStr) return '';
     try {
-      const parts = dateStr.split('-');
+      let parseable = dateStr;
+      if (/^\d{2}-\d{2}-\d{4}$/.test(dateStr)) {
+        const [dd, mm, yyyy] = dateStr.split('-');
+        parseable = `${yyyy}-${mm}-${dd}`;
+      }
+      const parts = parseable.split('-');
       if (parts.length === 3) {
         const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-        return d.toLocaleDateString('en-US', { weekday: 'long' });
+        return d.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
       }
     } catch {
       // ignore
@@ -85,7 +109,22 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
     time: string;
     classSubjects: Record<string, string>;
   }>(() => {
-    const today = new Date().toISOString().split('T')[0];
+    // Default to first entry if available, or today
+    const first = currentEntries[0];
+    if (first) {
+      const initialSubs: Record<string, string> = {};
+      TIMETABLE_CLASSES.forEach(cls => {
+        initialSubs[cls] = first.classSubjects[cls] || '';
+      });
+      return {
+        id: first.id,
+        date: first.date,
+        day: first.day || getStandardDay(first.date),
+        time: first.time || '09:00 AM - 12:00 PM',
+        classSubjects: initialSubs
+      };
+    }
+    const today = '2025-09-19';
     const initialSubs: Record<string, string> = {};
     TIMETABLE_CLASSES.forEach(cls => {
       initialSubs[cls] = '';
@@ -99,11 +138,30 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
   });
 
   const handleDateChange = (newDate: string) => {
-    setFormData(prev => ({
-      ...prev,
-      date: newDate,
-      day: getStandardDay(newDate)
-    }));
+    const existing = currentEntries.find(e => e.date === newDate);
+    const day = getStandardDay(newDate);
+    if (existing) {
+      const fullSubs: Record<string, string> = {};
+      TIMETABLE_CLASSES.forEach(cls => {
+        fullSubs[cls] = existing.classSubjects[cls] || '';
+      });
+      setFormData({
+        id: existing.id,
+        date: existing.date,
+        day: existing.day || day,
+        time: existing.time || '09:00 AM - 12:00 PM',
+        classSubjects: fullSubs
+      });
+      setIsEditing(true);
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        id: undefined,
+        date: newDate,
+        day: day
+      }));
+      setIsEditing(false);
+    }
   };
 
   const handleSubjectChange = (cls: string, val: string) => {
@@ -114,6 +172,16 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
         [cls]: val
       }
     }));
+  };
+
+  const handleQuickFillAll = (subject: string) => {
+    setFormData(prev => {
+      const nextSubs = { ...prev.classSubjects };
+      TIMETABLE_CLASSES.forEach(cls => {
+        nextSubs[cls] = subject;
+      });
+      return { ...prev, classSubjects: nextSubs };
+    });
   };
 
   const handleQuickFillGroup = (groupId: TimeTableGroupId, subject: string) => {
@@ -143,7 +211,7 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
     setIsEditing(true);
     setMessage({
       type: 'success',
-      text: `Loaded exam schedule for ${entry.date} (${entry.day}) in editor. Edit subjects below and click "Save Exam Schedule".`
+      text: `Loaded exam schedule for ${formatDisplayDate(entry.date)} (${entry.day}) in editor. Edit subjects below and click "Save Exam Schedule".`
     });
 
     // Smooth scroll to editor
@@ -152,20 +220,31 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
     }
   };
 
-  const handleResetForm = () => {
-    const today = new Date().toISOString().split('T')[0];
+  const handleResetForm = (newDateStr?: string) => {
+    const dateToUse = newDateStr || new Date().toISOString().split('T')[0];
     const initialSubs: Record<string, string> = {};
     TIMETABLE_CLASSES.forEach(cls => {
       initialSubs[cls] = '';
     });
     setFormData({
       id: undefined,
-      date: today,
-      day: getStandardDay(today),
+      date: dateToUse,
+      day: getStandardDay(dateToUse),
       time: '09:00 AM - 12:00 PM',
       classSubjects: initialSubs
     });
     setIsEditing(false);
+  };
+
+  const handleLoadOfficialSchedule = () => {
+    resetTimeTableToDefault();
+    setMessage({
+      type: 'success',
+      text: 'Official Examination Schedule (19-09-2025 to 25-09-2025) successfully loaded for all classes (NUR to X)!'
+    });
+    if (INITIAL_TIMETABLE_ENTRIES.length > 0) {
+      handleStartEdit(INITIAL_TIMETABLE_ENTRIES[0]);
+    }
   };
 
   const handleSaveEntry = (e: React.FormEvent) => {
@@ -180,7 +259,7 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
       exam,
       session,
       date: formData.date,
-      day: formData.day || getStandardDay(formData.date),
+      day: (formData.day || getStandardDay(formData.date)).toUpperCase(),
       time: formData.time.trim() || '09:00 AM - 12:00 PM',
       classSubjects: formData.classSubjects
     };
@@ -188,22 +267,18 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
     saveTimeTableEntry(entryToSave);
     setMessage({
       type: 'success',
-      text: `Exam schedule for ${entryToSave.date} (${entryToSave.day}) successfully saved!`
+      text: `Exam schedule for ${formatDisplayDate(entryToSave.date)} (${entryToSave.day}) successfully saved!`
     });
 
-    // Keep form ready for next date or reset
-    if (isEditing) {
-      setIsEditing(false);
-      handleResetForm();
-    }
+    setIsEditing(false);
   };
 
   const handleDeleteEntry = (id: string, date: string) => {
-    if (window.confirm(`Are you sure you want to remove exam schedule for ${date}?`)) {
+    if (window.confirm(`Are you sure you want to remove exam schedule for ${formatDisplayDate(date)}?`)) {
       deleteTimeTableEntry(id);
       setMessage({
         type: 'success',
-        text: `Exam schedule entry for ${date} removed.`
+        text: `Exam schedule entry for ${formatDisplayDate(date)} removed.`
       });
       if (formData.id === id) {
         handleResetForm();
@@ -227,10 +302,67 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
     updateExamNotes(updated);
   };
 
-  const activeGroupClasses =
-    selectedGroup === 'ALL'
-      ? TIMETABLE_CLASSES
-      : TIMETABLE_GROUPS[selectedGroup].classes;
+  // Subject Management Handlers
+  const handleAddNewSubject = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!newSubjectName.trim()) return;
+    const res = addSubject(newSubjectName);
+    if (res.success) {
+      setSubjectFeedback({
+        type: 'success',
+        text: `विषय "${newSubjectName.trim().toUpperCase()}" सफलतापूर्वक जोड़ा गया!`
+      });
+      setNewSubjectName('');
+      setTimeout(() => setSubjectFeedback(null), 3500);
+    } else {
+      setSubjectFeedback({
+        type: 'error',
+        text: res.message || 'विषय जोड़ने में त्रुटि हुई।'
+      });
+    }
+  };
+
+  const handleSaveEditSubject = (oldName: string) => {
+    if (!editingSubjectNewName.trim()) return;
+    const res = editSubject(oldName, editingSubjectNewName);
+    if (res.success) {
+      // Also update local formData if it used this subject
+      setFormData(prev => {
+        let changed = false;
+        const newSubs = { ...prev.classSubjects };
+        Object.keys(newSubs).forEach(cls => {
+          if (newSubs[cls] === oldName) {
+            newSubs[cls] = editingSubjectNewName.trim().toUpperCase();
+            changed = true;
+          }
+        });
+        return changed ? { ...prev, classSubjects: newSubs } : prev;
+      });
+      setSubjectFeedback({
+        type: 'success',
+        text: `विषय "${oldName}" बदलकर "${editingSubjectNewName.trim().toUpperCase()}" कर दिया गया!`
+      });
+      setEditingSubjectOldName(null);
+      setEditingSubjectNewName('');
+      setTimeout(() => setSubjectFeedback(null), 3500);
+    } else {
+      setSubjectFeedback({
+        type: 'error',
+        text: res.message || 'विषय संपादित करने में त्रुटि हुई।'
+      });
+    }
+  };
+
+  const handleDeleteSubject = (name: string) => {
+    if (window.confirm(`क्या आप विषय "${name}" को विषय सूची से हटाना चाहते हैं?`)) {
+      deleteSubject(name);
+      setSubjectFeedback({
+        type: 'success',
+        text: `विषय "${name}" हटा दिया गया।`
+      });
+      setTimeout(() => setSubjectFeedback(null), 3000);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -296,7 +428,7 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
           </div>
         )}
 
-        {/* Filter Controls Bar */}
+        {/* Action Controls Bar */}
         <div className="mt-4 flex flex-col md:flex-row md:items-center justify-between gap-4 pt-2">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
@@ -318,55 +450,36 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
                 className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 bg-white text-slate-800 focus:outline-none focus:border-blue-600 w-28"
               />
             </div>
+
+            <span className="px-3 py-1 rounded-lg bg-blue-50 text-blue-800 text-xs font-bold border border-blue-200">
+              समस्त कक्षाएँ (NUR से X तक क्रमवार)
+            </span>
           </div>
 
-          {/* Group View Tabs */}
-          <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 overflow-x-auto">
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setSelectedGroup('ALL')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                selectedGroup === 'ALL'
-                  ? 'bg-white text-blue-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              type="button"
+              onClick={handleLoadOfficialSchedule}
+              className="px-3 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
+              title="Load 19-09-2025 to 25-09-2025 official exam timetable"
             >
-              All Classes (NUR to X)
+              <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+              <span>19 से 25 सितम्बर सारिणी लोड करें</span>
             </button>
+
             <button
-              onClick={() => setSelectedGroup('PRE_PRIMARY')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                selectedGroup === 'PRE_PRIMARY'
-                  ? 'bg-white text-blue-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              type="button"
+              onClick={() => handleResetForm()}
+              className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
             >
-              NUR, LKG, UKG (एक साथ)
-            </button>
-            <button
-              onClick={() => setSelectedGroup('PRIMARY')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                selectedGroup === 'PRIMARY'
-                  ? 'bg-white text-blue-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Class I से V (एक साथ)
-            </button>
-            <button
-              onClick={() => setSelectedGroup('SECONDARY')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                selectedGroup === 'SECONDARY'
-                  ? 'bg-white text-blue-700 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Class VI से X (एक साथ)
+              <Plus className="w-3.5 h-3.5" />
+              <span>+ नई परीक्षा तिथि</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* 1. EXAM DATE AUR CLASS WISE SUBJECT SET OR EDIT KARNE KA PANEL */}
+      {/* 1. EXAM DATE, DAY, CLASS & SUBJECT SET/EDIT PANEL */}
       <div
         ref={editorRef}
         className="bg-white rounded-2xl border-2 border-blue-200 shadow-xs overflow-hidden"
@@ -380,17 +493,17 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">
                   {isEditing
-                    ? `Edit Exam Date & Subjects (परीक्षा दिनांक व विषय संपादित करें)`
-                    : `Set Exam Date & Class-Wise Subjects (परीक्षा दिनांक एवं कक्षावार विषय सेट करें)`}
+                    ? `परीक्षा दिनांक, वार एवं विषय संपादित करें (Edit Schedule)`
+                    : `परीक्षा दिनांक, वार एवं कक्षावार विषय सेट करें (Set Schedule)`}
                 </h3>
                 {isEditing && (
-                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black">
-                    Editing: {formData.date}
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-black">
+                    संपादित: {formatDisplayDate(formData.date)} ({formData.day})
                   </span>
                 )}
               </div>
               <p className="text-xs text-slate-600 mt-0.5">
-                Set examination date, timings, and class-wise subjects for Pre-Primary, Primary, and Secondary sections together.
+                क्रम: 1. दिनांक चुनें → 2. वार (Day) → 3. कक्षावार विषय (NUR से X तक क्रमवार)। (ग्रुप केवल प्रिंट के लिए हैं)
               </p>
             </div>
           </div>
@@ -399,232 +512,556 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
             {isEditing && (
               <button
                 type="button"
-                onClick={handleResetForm}
+                onClick={() => handleResetForm()}
                 className="px-3 py-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Cancel / New Entry</span>
+                <span>रद्द करें / नई प्रविष्टि</span>
               </button>
             )}
           </div>
         </div>
 
-        <form onSubmit={handleSaveEntry} className="p-6 space-y-5">
-          {/* Row 1: Date, Day, Timing */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                📅 Exam Date (परीक्षा दिनांक) *
-              </label>
-              <input
-                type="date"
-                required
-                value={formData.date}
-                onChange={e => handleDateChange(e.target.value)}
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white font-bold text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                वार (Day of Week)
-              </label>
-              <input
-                type="text"
-                value={formData.day}
-                onChange={e => setFormData(prev => ({ ...prev, day: e.target.value }))}
-                placeholder="e.g. Monday"
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-slate-50 font-bold text-blue-900 focus:outline-none focus:border-blue-600"
-              />
-              {formData.date && (
-                <span className="text-[10px] text-blue-600 font-semibold mt-1 block">
-                  {getDayNameWithHindi(formData.date)}
+        <form onSubmit={handleSaveEntry} className="p-6 space-y-6">
+          {/* STEP 1: PAHLE DATE SELECT, USKE SATH DAY */}
+          <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-200 space-y-3.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-lg bg-blue-600 text-white text-xs font-black flex items-center justify-center">
+                  1
                 </span>
+                <h4 className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                  पहले दिनांक व वार चुनें (Step 1: Select Exam Date & Day):
+                </h4>
+              </div>
+
+              {formData.date && (
+                <div className="px-3 py-1 rounded-xl bg-blue-100/90 border border-blue-300 text-blue-900 text-xs font-black flex items-center gap-2">
+                  <Calendar className="w-3.5 h-3.5 text-blue-700" />
+                  <span>
+                    दिनांक: {formatDisplayDate(formData.date)} ({formData.day || getStandardDay(formData.date)})
+                  </span>
+                  <span className="text-slate-600 font-semibold">
+                    [{getDayNameWithHindi(formData.date).split(' ')[1] || ''}]
+                  </span>
+                </div>
               )}
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* Date Input */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  📅 परीक्षा दिनांक (Exam Date) *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={formData.date}
+                  onChange={e => handleDateChange(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-300 bg-white font-black text-slate-900 focus:outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100 shadow-2xs"
+                />
+                <span className="text-[10px] text-slate-500 font-medium mt-1 block">
+                  फॉर्मेट: <strong>{formatDisplayDate(formData.date)}</strong>
+                </span>
+              </div>
+
+              {/* Day Input */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  वार (Day of Week)
+                </label>
+                <input
+                  type="text"
+                  value={formData.day}
+                  onChange={e => setFormData(prev => ({ ...prev, day: e.target.value.toUpperCase() }))}
+                  placeholder="e.g. FRIDAY"
+                  className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-300 bg-slate-50 font-black text-blue-900 uppercase focus:outline-none focus:border-blue-600 shadow-2xs"
+                />
+                {formData.date && (
+                  <span className="text-[10px] text-blue-700 font-bold mt-1 block">
+                    {getDayNameWithHindi(formData.date)}
+                  </span>
+                )}
+              </div>
+
+              {/* Timing */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  ⏰ परीक्षा समय (Exam Timing)
+                </label>
+                <input
+                  type="text"
+                  value={formData.time}
+                  onChange={e => setFormData(prev => ({ ...prev, time: e.target.value }))}
+                  placeholder="e.g. 09:00 AM - 12:00 PM"
+                  className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-900 focus:outline-none focus:border-blue-600 shadow-2xs"
+                />
+                <span className="text-[10px] text-slate-400 font-medium mt-1 block">
+                  समय अंतराल (e.g. 09:00 AM - 12:00 PM)
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Date Select Chips */}
+            <div className="pt-2.5 border-t border-slate-200">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-extrabold text-slate-600">
+                  त्वरित दिनांक चयन (Click Date to Load):
+                </span>
+                {currentEntries.map(entry => {
+                  const isSelected = formData.date === entry.date;
+                  return (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      onClick={() => handleStartEdit(entry)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'bg-white text-slate-700 border border-slate-200 hover:border-blue-400 hover:text-blue-700 shadow-2xs'
+                      }`}
+                    >
+                      <Calendar className="w-3 h-3" />
+                      <span>{formatDisplayDate(entry.date)}</span>
+                      <span className={isSelected ? 'text-blue-200 text-[10px]' : 'text-slate-400 text-[10px]'}>
+                        ({entry.day})
+                      </span>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => handleResetForm()}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-white text-emerald-700 border border-emerald-300 hover:bg-emerald-50 flex items-center gap-1 cursor-pointer shadow-2xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>+ नई दिनांक जोड़ें</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* STEP 2: USKE BAD CLASS FIR SUBJECT (NUR SE X TAK) - स्वतंत्र चयन व संपादन */}
+          <div className="p-4 bg-white rounded-2xl border border-slate-200 space-y-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-lg bg-blue-600 text-white text-xs font-black flex items-center justify-center shrink-0">
+                  2
+                </span>
+                <div>
+                  <h4 className="text-xs font-black text-slate-900 uppercase tracking-wide flex items-center gap-2">
+                    <span>कक्षा फिर विषय दर्ज करें (Step 2: Class-Wise Subjects - NUR से X तक):</span>
+                    <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-200">
+                      स्वतंत्र चयन व संपादन
+                    </span>
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    प्रत्येक कक्षा के लिए स्वतंत्र रूप से विषय चुनें या लिखें • क्रम: NUR → LKG → UKG → I → ... → X
+                  </p>
+                </div>
+              </div>
+
+              {/* Subject Manager Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSubjectManagerOpen(prev => !prev)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all ${
+                    isSubjectManagerOpen
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                  }`}
+                  title="नया विषय जोड़ें या मौजूद विषय संपादित करें"
+                >
+                  <Settings2 className="w-3.5 h-3.5" />
+                  <span>विषय जोड़ें / एडिट करें ({subjectList.length})</span>
+                  <ChevronDown
+                    className={`w-3 h-3 transition-transform ${isSubjectManagerOpen ? 'rotate-180' : ''}`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {/* EXPANDABLE SUBJECT MANAGER PANEL (विषय सूची संपादन एवं नया विषय जोड़ने का पैनल) */}
+            {isSubjectManagerOpen && (
+              <div className="p-4 rounded-xl bg-gradient-to-br from-blue-50/90 to-indigo-50/70 border border-blue-200 shadow-xs space-y-3 animate-in fade-in duration-200">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-blue-200/80 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-blue-700" />
+                    <span className="text-xs font-black text-blue-950 uppercase tracking-wide">
+                      विषय सूची प्रबंधन (Subject Manager: Add, Edit, Delete):
+                    </span>
+                    <span className="text-[11px] font-semibold text-blue-700">
+                      कुल {subjectList.length} विषय
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (window.confirm('क्या आप विषय सूची को डिफ़ॉल्ट विषयों पर रीसेट करना चाहते हैं?')) {
+                          resetSubjectList();
+                        }
+                      }}
+                      className="text-[11px] font-bold text-slate-600 hover:text-red-700 flex items-center gap-1 cursor-pointer"
+                      title="Reset to default subject list"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>डिफ़ॉल्ट रीसेट करें</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsSubjectManagerOpen(false)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-white/80 cursor-pointer"
+                      title="बंद करें"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Feedback Toast */}
+                {subjectFeedback && (
+                  <div
+                    className={`p-2.5 rounded-lg text-xs font-bold flex items-center gap-2 ${
+                      subjectFeedback.type === 'success'
+                        ? 'bg-emerald-100/90 text-emerald-900 border border-emerald-300'
+                        : 'bg-red-100/90 text-red-900 border border-red-300'
+                    }`}
+                  >
+                    {subjectFeedback.type === 'success' ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                    )}
+                    <span>{subjectFeedback.text}</span>
+                  </div>
+                )}
+
+                {/* Add New Subject Input Row */}
+                <form onSubmit={handleAddNewSubject} className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newSubjectName}
+                    onChange={e => setNewSubjectName(e.target.value.toUpperCase())}
+                    placeholder="नया विषय नाम लिखें (e.g. MORAL SCIENCE, GENERAL KNOWLEDGE, ART & CRAFT)..."
+                    className="flex-1 px-3 py-2 text-xs rounded-xl border border-blue-300 bg-white font-bold text-slate-800 uppercase focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs whitespace-nowrap"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>+ विषय जोड़ें (Add Subject)</span>
+                  </button>
+                </form>
+
+                {/* List of Managed Subjects with Edit & Delete */}
+                <div className="space-y-1 pt-1">
+                  <div className="text-[11px] font-bold text-slate-600">
+                    उपलब्ध विषय (क्लिक करके एडिट या डिलीट करें):
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto p-1 bg-white/70 rounded-xl border border-blue-200/60">
+                    {subjectList.map(sub => {
+                      const isEditingThis = editingSubjectOldName === sub;
+                      if (isEditingThis) {
+                        return (
+                          <div
+                            key={sub}
+                            className="flex items-center gap-1 p-1 bg-amber-50 border border-amber-300 rounded-lg shadow-2xs"
+                          >
+                            <input
+                              type="text"
+                              value={editingSubjectNewName}
+                              onChange={e => setEditingSubjectNewName(e.target.value.toUpperCase())}
+                              autoFocus
+                              className="px-2 py-0.5 text-xs font-bold rounded border border-amber-400 bg-white text-slate-900 uppercase focus:outline-none w-36"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSaveEditSubject(sub)}
+                              className="p-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
+                              title="सहेजें (Save)"
+                            >
+                              <Check className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingSubjectOldName(null);
+                                setEditingSubjectNewName('');
+                              }}
+                              className="p-1 rounded bg-slate-200 text-slate-700 hover:bg-slate-300 cursor-pointer"
+                              title="रद्द करें"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div
+                          key={sub}
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:border-blue-300 shadow-2xs group text-xs"
+                        >
+                          <span className="font-bold text-slate-800 text-[11px]">{sub}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingSubjectOldName(sub);
+                              setEditingSubjectNewName(sub);
+                            }}
+                            className="text-slate-400 hover:text-blue-700 p-0.5 cursor-pointer"
+                            title={`विषय "${sub}" संपादित करें (Edit)`}
+                          >
+                            <Edit2 className="w-2.5 h-2.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSubject(sub)}
+                            className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
+                            title={`विषय "${sub}" हटाएं (Delete)`}
+                          >
+                            <Trash2 className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Quick Fill Preset Subject Chips */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[11px] font-bold text-slate-500">त्वरित विषय बटन:</span>
+              {subjectList.slice(0, 10).map(sub => (
+                <button
+                  key={sub}
+                  type="button"
+                  onClick={() => handleQuickFillAll(sub)}
+                  className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-blue-100 text-slate-700 hover:text-blue-800 text-[10px] font-bold border border-slate-200 cursor-pointer transition-colors"
+                  title={`Click to fill ${sub} across all classes`}
+                >
+                  + {sub}
+                </button>
+              ))}
+              {subjectList.length > 10 && (
+                <button
+                  type="button"
+                  onClick={() => setIsSubjectManagerOpen(true)}
+                  className="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-200 cursor-pointer"
+                >
+                  +{subjectList.length - 10} और...
+                </button>
+              )}
+            </div>
+
+            {/* TABULAR ROW VIEW (Row Format - NUR to X with Dropdown + Free Input) */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                ⏰ Exam Timing (परीक्षा समय)
-              </label>
-              <input
-                type="text"
-                value={formData.time}
-                onChange={e => setFormData(prev => ({ ...prev, time: e.target.value }))}
-                placeholder="e.g. 09:00 AM - 12:00 PM"
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-900 focus:outline-none focus:border-blue-600"
-              />
-            </div>
-          </div>
-
-          {/* Quick Fill Helpers */}
-          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
-            <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-700 uppercase tracking-wide">
-              <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-              <span>⚡ Quick Preset Fill (एक क्लिक में पूरे वर्ग का विषय भरें):</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-slate-500 font-bold">पूर्व-प्राथमिक (Pre-Primary):</span>
-              {['English Written', 'English Rhymes', 'Hindi Written', 'Mathematics', 'Drawing & Colouring', 'GK & EVS'].map(sub => (
-                <button
-                  key={sub}
-                  type="button"
-                  onClick={() => handleQuickFillGroup('PRE_PRIMARY', sub)}
-                  className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:border-blue-400 text-[11px] font-bold text-slate-700 hover:text-blue-700 cursor-pointer shadow-2xs"
-                >
-                  + {sub}
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-slate-500 font-bold">प्राथमिक (Class I से V):</span>
-              {['Hindi', 'English', 'Mathematics', 'EVS', 'Computer', 'Sanskrit', 'Drawing'].map(sub => (
-                <button
-                  key={sub}
-                  type="button"
-                  onClick={() => handleQuickFillGroup('PRIMARY', sub)}
-                  className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:border-blue-400 text-[11px] font-bold text-slate-700 hover:text-blue-700 cursor-pointer shadow-2xs"
-                >
-                  + {sub}
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-slate-500 font-bold">माध्यमिक (Class VI से X):</span>
-              {['Hindi', 'English', 'Mathematics', 'Science', 'Social Science', 'Sanskrit', 'Computer'].map(sub => (
-                <button
-                  key={sub}
-                  type="button"
-                  onClick={() => handleQuickFillGroup('SECONDARY', sub)}
-                  className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:border-blue-400 text-[11px] font-bold text-slate-700 hover:text-blue-700 cursor-pointer shadow-2xs"
-                >
-                  + {sub}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Class Subjects Sections */}
-          <div className="space-y-4">
-            {/* 1. Pre-Primary */}
-            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-200 mb-3">
-                <h4 className="text-xs font-black text-blue-900 uppercase">
-                  1. पूर्व-प्राथमिक वर्ग (Pre-Primary Section: NUR, LKG, UKG)
-                </h4>
-                <span className="text-[10px] font-bold text-slate-500">3 Classes</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {TIMETABLE_GROUPS.PRE_PRIMARY.classes.map(cls => (
-                  <div key={cls}>
-                    <label className="block text-xs font-black text-slate-800 mb-1">
-                      Class {cls}
-                    </label>
-                    <input
-                      type="text"
-                      list="common-subjects-list"
-                      value={formData.classSubjects[cls] || ''}
-                      onChange={e => handleSubjectChange(cls, e.target.value)}
-                      placeholder="e.g. English Oral & Rhymes"
-                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-900 focus:outline-none focus:border-blue-600 shadow-2xs"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* 2. Primary */}
-            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-200 mb-3">
-                <h4 className="text-xs font-black text-blue-900 uppercase">
-                  2. प्राथमिक वर्ग (Primary Section: Class I से V)
-                </h4>
-                <span className="text-[10px] font-bold text-slate-500">
-                  Maps automatically to IA, IB, IIA, IIB, etc.
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-1.5">
+                <span className="text-[11px] font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                  <span>पंक्तिवार विषय प्रविष्टि (Table Row Input - स्वतंत्र रूप से विषय चुनें या टाइप करें):</span>
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  ड्रॉपडाउन से कोई भी विषय चुनें या नीचे स्वतंत्र रूप से लिखें
                 </span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                {TIMETABLE_GROUPS.PRIMARY.classes.map(cls => (
-                  <div key={cls}>
-                    <label className="block text-xs font-black text-slate-800 mb-1">
-                      Class {cls}
-                    </label>
-                    <input
-                      type="text"
-                      list="common-subjects-list"
-                      value={formData.classSubjects[cls] || ''}
-                      onChange={e => handleSubjectChange(cls, e.target.value)}
-                      placeholder="Subject..."
-                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-900 focus:outline-none focus:border-blue-600 shadow-2xs"
-                    />
-                  </div>
-                ))}
+
+              <div className="overflow-x-auto pb-2 border border-slate-200 rounded-xl bg-slate-50">
+                <table className="w-full text-xs border-collapse min-w-[1100px]">
+                  <thead>
+                    <tr className="bg-slate-800 text-white">
+                      <th className="py-2.5 px-3 text-left font-black text-[11px] border-r border-slate-700 w-36 shrink-0">
+                        दिनांक व वार
+                      </th>
+                      {TIMETABLE_CLASSES.map(cls => (
+                        <th
+                          key={cls}
+                          className="py-2 px-2 text-center font-black text-xs border-r border-slate-700 bg-slate-750"
+                        >
+                          <div>{cls}</div>
+                          <div className="text-[9px] font-normal text-slate-300">
+                            {cls === 'NUR' || cls === 'LKG' || cls === 'UKG' ? cls : `Class ${cls}`}
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="bg-white">
+                      <td className="py-3 px-3 border-r border-slate-200 font-bold text-slate-900 bg-blue-50/40">
+                        <div className="font-mono text-xs font-black text-blue-950">
+                          {formatDisplayDate(formData.date)}
+                        </div>
+                        <div className="text-[10px] font-extrabold text-blue-700 uppercase">
+                          ({formData.day || getStandardDay(formData.date)})
+                        </div>
+                      </td>
+                      {TIMETABLE_CLASSES.map((cls, idx) => {
+                        const currentVal = formData.classSubjects[cls] || '';
+                        return (
+                          <td key={cls} className="py-2 px-1.5 border-r border-slate-200 align-top">
+                            {/* Dropdown to independently select ANY subject */}
+                            <select
+                              value={subjectList.includes(currentVal) ? currentVal : ''}
+                              onChange={e => {
+                                if (e.target.value === '__ADD__') {
+                                  setIsSubjectManagerOpen(true);
+                                } else if (e.target.value) {
+                                  handleSubjectChange(cls, e.target.value);
+                                }
+                              }}
+                              className="w-full text-[10px] font-bold py-1 px-1 rounded-md border border-slate-300 bg-slate-50 hover:bg-white text-slate-800 cursor-pointer focus:outline-none focus:border-blue-600 mb-1"
+                              title={`कक्षा ${cls} के लिए स्वतंत्र विषय चुनें`}
+                            >
+                              <option value="">-- विषय चुनें --</option>
+                              {subjectList.map(sub => (
+                                <option key={sub} value={sub}>
+                                  {sub}
+                                </option>
+                              ))}
+                              <option value="__ADD__">✏️ + नया विषय जोड़ें...</option>
+                            </select>
+
+                            {/* Free-form text input with Clear Button */}
+                            <div className="relative">
+                              <input
+                                type="text"
+                                list="common-subjects-list"
+                                value={currentVal}
+                                onChange={e => handleSubjectChange(cls, e.target.value.toUpperCase())}
+                                placeholder="या स्वतंत्र लिखें"
+                                tabIndex={idx + 1}
+                                className="w-full px-1.5 py-1 text-[11px] font-bold text-center rounded-lg border border-slate-300 bg-white text-slate-900 uppercase focus:outline-none focus:border-blue-600 focus:bg-amber-50/60 shadow-2xs pr-5"
+                              />
+                              {currentVal && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSubjectChange(cls, '')}
+                                  className="absolute right-1 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-500 text-[10px] cursor-pointer"
+                                  title="खाली करें"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
 
-            {/* 3. Secondary */}
-            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-200 mb-3">
-                <h4 className="text-xs font-black text-blue-900 uppercase">
-                  3. माध्यमिक वर्ग (Middle & Secondary Section: Class VI से X)
-                </h4>
-                <span className="text-[10px] font-bold text-slate-500">
-                  Maps automatically to VIA, VIB, XA, XB, etc.
+            {/* SEQUENTIAL 13-CLASS CARDS (NUR TO X) WITH INDEPENDENT SELECTION & EDIT */}
+            <div className="pt-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-2">
+                <span className="text-[11px] font-black text-slate-800 uppercase tracking-wide">
+                  कक्षावार विस्तृत कार्ड्स (13 Classes: NUR to X - स्वतंत्र विषय चयन):
+                </span>
+                <span className="text-[10px] text-slate-500 font-medium">
+                  पूर्व-प्राथमिक (NUR-UKG) | प्राथमिक (I-V) | माध्यमिक (VI-X)
                 </span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                {TIMETABLE_GROUPS.SECONDARY.classes.map(cls => (
-                  <div key={cls}>
-                    <label className="block text-xs font-black text-slate-800 mb-1">
-                      Class {cls}
-                    </label>
-                    <input
-                      type="text"
-                      list="common-subjects-list"
-                      value={formData.classSubjects[cls] || ''}
-                      onChange={e => handleSubjectChange(cls, e.target.value)}
-                      placeholder="Subject..."
-                      className="w-full px-3 py-1.5 text-xs rounded-xl border border-slate-300 bg-white font-semibold text-slate-900 focus:outline-none focus:border-blue-600 shadow-2xs"
-                    />
-                  </div>
-                ))}
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 xl:grid-cols-13 gap-2.5">
+                {TIMETABLE_CLASSES.map((cls, idx) => {
+                  const isPrePrimary = cls === 'NUR' || cls === 'LKG' || cls === 'UKG';
+                  const isSecondary = ['VI', 'VII', 'VIII', 'IX', 'X'].includes(cls);
+                  const currentVal = formData.classSubjects[cls] || '';
+
+                  return (
+                    <div
+                      key={cls}
+                      className={`p-2.5 rounded-xl border transition-all ${
+                        isPrePrimary
+                          ? 'bg-amber-50/40 border-amber-200'
+                          : isSecondary
+                          ? 'bg-blue-50/40 border-blue-200'
+                          : 'bg-emerald-50/40 border-emerald-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="font-black text-xs text-slate-900">
+                          {cls === 'NUR' || cls === 'LKG' || cls === 'UKG' ? cls : `कक्षा ${cls}`}
+                        </span>
+                        <span className="text-[9px] font-bold text-slate-400">#{idx + 1}</span>
+                      </div>
+
+                      {/* Dropdown selector for this class */}
+                      <select
+                        value={subjectList.includes(currentVal) ? currentVal : ''}
+                        onChange={e => {
+                          if (e.target.value === '__ADD__') {
+                            setIsSubjectManagerOpen(true);
+                          } else if (e.target.value) {
+                            handleSubjectChange(cls, e.target.value);
+                          }
+                        }}
+                        className="w-full text-[10px] font-bold py-1 px-1 rounded-md border border-slate-300 bg-white text-slate-800 cursor-pointer focus:outline-none focus:border-blue-600 mb-1"
+                      >
+                        <option value="">-- विषय चुनें --</option>
+                        {subjectList.map(sub => (
+                          <option key={sub} value={sub}>
+                            {sub}
+                          </option>
+                        ))}
+                        <option value="__ADD__">✏️ + नया विषय...</option>
+                      </select>
+
+                      {/* Free-form text input */}
+                      <div className="relative">
+                        <input
+                          type="text"
+                          list="common-subjects-list"
+                          value={currentVal}
+                          onChange={e => handleSubjectChange(cls, e.target.value.toUpperCase())}
+                          placeholder="या स्वतंत्र लिखें"
+                          className="w-full px-2 py-1.5 text-xs font-bold rounded-lg border border-slate-300 bg-white text-slate-900 uppercase focus:outline-none focus:border-blue-600 shadow-2xs pr-5"
+                        />
+                        {currentVal && (
+                          <button
+                            type="button"
+                            onClick={() => handleSubjectChange(cls, '')}
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-red-500 text-xs cursor-pointer"
+                            title="हटाएं"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
+            {/* DYNAMIC DATALIST POPULATED WITH CURRENT SUBJECTS */}
             <datalist id="common-subjects-list">
-              {CONFIG.COMMON_SUBJECTS.map(sub => (
+              {subjectList.map(sub => (
                 <option key={sub} value={sub} />
               ))}
-              <option value="English Rhymes & Oral" />
-              <option value="English Written" />
-              <option value="Hindi Rhymes & Oral" />
-              <option value="Hindi Written" />
-              <option value="Drawing & Colouring" />
-              <option value="General Knowledge & Conversation" />
             </datalist>
           </div>
 
+          {/* FORM FOOTER / SAVE BUTTON */}
           <div className="flex flex-col sm:flex-row items-center justify-between pt-3 border-t border-slate-200 gap-3">
-            <div className="text-xs text-slate-500">
-              {isEditing ? (
-                <span>
-                  Modifying schedule for{' '}
-                  <strong className="text-blue-700">{formData.date}</strong>. Changes will update attendance registers.
-                </span>
-              ) : (
-                <span>
-                  Click <strong>"Save Exam Schedule"</strong> to add this date to the official timetable.
-                </span>
-              )}
+            <div className="text-xs text-slate-600">
+              दिनांक: <strong className="text-blue-700">{formatDisplayDate(formData.date)}</strong>{' '}
+              ({formData.day || getStandardDay(formData.date)}) | समय: <strong>{formData.time}</strong>
             </div>
 
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleResetForm}
+                onClick={() => handleResetForm()}
                 className="px-4 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold cursor-pointer transition-colors"
               >
-                Reset Fields
+                खाली करें (Reset)
               </button>
               <button
                 type="submit"
@@ -646,13 +1083,25 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">
-              {TIMETABLE_GROUPS[selectedGroup].label} ({currentEntries.length} Exam Dates Scheduled)
+              मास्टर परीक्षा समय-सारिणी: NUR से X तक ({currentEntries.length} Exam Dates Scheduled)
             </h3>
           </div>
-          <span className="text-xs text-slate-500 font-medium">
-            Examination: <strong className="text-slate-800">{exam}</strong> | Session:{' '}
-            <strong className="text-slate-800">{session}</strong>
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-500 font-medium">
+              Examination: <strong className="text-slate-800">{exam}</strong> | Session:{' '}
+              <strong className="text-slate-800">{session}</strong>
+            </span>
+            <button
+              onClick={() => {
+                setEditingNotes([...examNotes]);
+                setShowPrintModal(true);
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>प्रिंट करें (Group-wise Print)</span>
+            </button>
+          </div>
         </div>
 
         {currentEntries.length === 0 ? (
@@ -660,7 +1109,7 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
             <Calendar className="w-10 h-10 mx-auto text-slate-300 mb-3" />
             <p className="font-semibold text-sm text-slate-700">No examination dates scheduled yet.</p>
             <p className="text-slate-400 mt-1">
-              Use the panel above to set dates and subjects for NUR to X.
+              Use the panel above to set dates and subjects for NUR to X, or click "19 से 25 सितम्बर सारिणी लोड करें".
             </p>
           </div>
         ) : (
@@ -671,10 +1120,10 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
                   <th className="py-3 px-3 w-12 text-center border-r border-slate-200">क्र.</th>
                   <th className="py-3 px-3 w-36 border-r border-slate-200">Date & Day</th>
                   <th className="py-3 px-3 w-28 border-r border-slate-200">Timing</th>
-                  {activeGroupClasses.map(cls => (
+                  {TIMETABLE_CLASSES.map(cls => (
                     <th
                       key={cls}
-                      className="py-3 px-3 border-r border-slate-200 text-center font-bold bg-blue-50/40 text-blue-950"
+                      className="py-3 px-2 border-r border-slate-200 text-center font-bold bg-blue-50/40 text-blue-950"
                     >
                       <div className="font-black text-xs">{cls}</div>
                       <div className="text-[9px] text-slate-500 font-normal">
@@ -684,7 +1133,7 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
                       </div>
                     </th>
                   ))}
-                  <th className="py-3 px-3 w-28 text-center">Set / Edit</th>
+                  <th className="py-3 px-3 w-28 text-center">एक्शन</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
@@ -700,10 +1149,10 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
                     </td>
                     <td className="py-3 px-3 border-r border-slate-100">
                       <div className="font-black text-slate-900 text-xs font-mono">
-                        {entry.date}
+                        {formatDisplayDate(entry.date)}
                       </div>
                       <div className="text-[10px] font-bold text-blue-700 uppercase">
-                        {entry.day}
+                        ({entry.day})
                       </div>
                     </td>
                     <td className="py-3 px-3 text-slate-600 font-medium text-[11px] border-r border-slate-100 whitespace-nowrap">
@@ -712,12 +1161,12 @@ export const ExamTimeTableView: React.FC<ExamTimeTableViewProps> = ({ onNavigate
                         <span>{entry.time}</span>
                       </div>
                     </td>
-                    {activeGroupClasses.map(cls => {
+                    {TIMETABLE_CLASSES.map(cls => {
                       const subject = entry.classSubjects[cls];
                       return (
                         <td
                           key={cls}
-                          className="py-3 px-2.5 text-center border-r border-slate-100 text-[11px]"
+                          className="py-3 px-2 text-center border-r border-slate-100 text-[11px]"
                         >
                           {subject ? (
                             <span className="inline-block px-2 py-1 rounded-lg bg-blue-50 text-blue-900 font-bold border border-blue-200/60 shadow-2xs">
@@ -1046,7 +1495,7 @@ const PrintableGroupSheet: React.FC<PrintableGroupSheetProps> = ({
                 {idx + 1}
               </td>
               <td className="py-2.5 px-2 border border-black text-center font-black text-black font-mono">
-                {entry.date}
+                {formatDisplayDate(entry.date)}
               </td>
               <td className="py-2.5 px-2 border border-black text-center font-bold text-black">
                 {entry.day}
