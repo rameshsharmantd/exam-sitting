@@ -722,49 +722,6 @@ export const SittingArrangementView: React.FC = () => {
               </div>
             </div>
 
-            {/* Font Size Selector (Large Font) */}
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-bold text-slate-700 flex items-center gap-1">
-                <Type className="w-3.5 h-3.5 text-blue-600" />
-                <span>Font Size (फॉन्ट):</span>
-              </label>
-              <div className="flex items-center bg-white rounded-lg border border-slate-300 p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setFontSizeScale('large')}
-                  className={`px-2.5 py-1 text-xs font-bold rounded cursor-pointer ${
-                    fontSizeScale === 'large'
-                      ? 'bg-blue-600 text-white shadow-2xs'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  Large
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFontSizeScale('extra-large')}
-                  className={`px-2.5 py-1 text-xs font-bold rounded cursor-pointer ${
-                    fontSizeScale === 'extra-large'
-                      ? 'bg-blue-600 text-white shadow-2xs'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  XL (बड़ा)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFontSizeScale('jumbo')}
-                  className={`px-2.5 py-1 text-xs font-bold rounded cursor-pointer ${
-                    fontSizeScale === 'jumbo'
-                      ? 'bg-blue-600 text-white shadow-2xs'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  Jumbo
-                </button>
-              </div>
-            </div>
-
             {/* Apply Button */}
             <button
               type="button"
@@ -891,29 +848,6 @@ export const SittingArrangementView: React.FC = () => {
                           const isDoor = seat.doorWindow.includes('DOOR');
                           const isWindow = seat.doorWindow.includes('WINDOW');
 
-                          // Card height based on font size scale
-                          const cardHeight =
-                            fontSizeScale === 'jumbo'
-                              ? 'h-32'
-                              : fontSizeScale === 'extra-large'
-                              ? 'h-28'
-                              : 'h-26';
-
-                          // Class and Roll number font sizes
-                          const classFont =
-                            fontSizeScale === 'jumbo'
-                              ? 'text-lg sm:text-xl'
-                              : fontSizeScale === 'extra-large'
-                              ? 'text-base sm:text-lg'
-                              : 'text-sm sm:text-base';
-
-                          const rollFont =
-                            fontSizeScale === 'jumbo'
-                              ? 'text-3xl sm:text-4xl'
-                              : fontSizeScale === 'extra-large'
-                              ? 'text-2xl sm:text-3xl'
-                              : 'text-xl sm:text-2xl';
-
                           return (
                             <div
                               key={seat.seatNo}
@@ -922,12 +856,7 @@ export const SittingArrangementView: React.FC = () => {
                               onDragOver={handleDragOver}
                               onDrop={() => handleDrop(seat.seatNo)}
                               onClick={() => handleSeatClick(seat.seatNo, occupied)}
-                              title={
-                                occupied
-                                  ? `${seat.studentName} (${seat.studentId}) - ${seat.className} Roll: ${seat.rollNo}`
-                                  : 'Vacant Desk'
-                              }
-                              className={`w-36 ${cardHeight} rounded-xl border-2 p-2 relative transition-all cursor-pointer select-none flex flex-col justify-between ${
+                              className={`w-36 h-28 rounded-xl border-2 p-2 relative transition-all cursor-pointer select-none flex flex-col justify-between ${
                                 isSwapSelected
                                   ? 'border-blue-600 bg-blue-50 ring-2 ring-blue-500 shadow-md scale-102'
                                   : occupied
@@ -935,9 +864,9 @@ export const SittingArrangementView: React.FC = () => {
                                   : 'bg-white border-dashed border-slate-300 hover:border-slate-400'
                               } ${currentPlan.locked ? 'cursor-default' : ''}`}
                             >
-                              {/* Top row: Seat coordinate (R1C1) & Door/Window markers */}
+                              {/* Top row: Seat No & Door/Window markers */}
                               <div className="flex items-center justify-between">
-                                <span className="font-mono text-[10px] font-bold text-slate-400">
+                                <span className="font-mono text-[10px] font-bold text-slate-500">
                                   {seat.seatNo}
                                 </span>
 
@@ -955,23 +884,26 @@ export const SittingArrangementView: React.FC = () => {
                                 </div>
                               </div>
 
-                              {/* SIRF CLASS AUR ROLL NUMBER - LARGE FONT */}
+                              {/* Student Info or Empty */}
                               {occupied ? (
-                                <div className="flex-1 flex flex-col items-center justify-center my-auto py-0.5 text-center">
-                                  <span className={`font-black text-blue-900 uppercase tracking-wide leading-tight ${classFont}`}>
-                                    {seat.className}
-                                  </span>
-                                  <div className="flex items-baseline gap-1 mt-0.5">
-                                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                      ROLL
+                                <div className="min-w-0 my-1">
+                                  <div className="flex items-center justify-between text-[11px]">
+                                    <span className="font-bold text-blue-900 truncate">
+                                      {seat.className}
                                     </span>
-                                    <span className={`font-black text-slate-900 font-mono tracking-tight leading-none ${rollFont}`}>
-                                      {seat.rollNo}
+                                    <span className="font-mono text-slate-600 font-semibold text-[10px]">
+                                      R: {seat.rollNo}
                                     </span>
+                                  </div>
+                                  <div className="text-xs font-bold text-slate-900 leading-tight truncate mt-0.5">
+                                    {seat.studentName}
+                                  </div>
+                                  <div className="text-[10px] font-mono text-slate-400 truncate">
+                                    {seat.studentId}
                                   </div>
                                 </div>
                               ) : (
-                                <div className="flex-1 flex items-center justify-center text-center text-xs font-bold text-slate-400">
+                                <div className="text-center py-3 text-[11px] font-semibold text-slate-400">
                                   VACANT DESK
                                 </div>
                               )}
@@ -1010,20 +942,64 @@ export const SittingArrangementView: React.FC = () => {
       {/* Notice Board Printable Modal */}
       {showPrintModal && currentPlan && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-2xl max-w-6xl w-full max-h-[95vh] shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             {/* Modal header bar */}
-            <div className="px-6 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between print:hidden">
-              <span className="text-xs font-bold text-slate-700 uppercase">
-                Examination Room Seating Chart • Notice Board Copy
-              </span>
+            <div className="px-6 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between print:hidden flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                  <Grid3X3 className="w-4 h-4 text-blue-600" />
+                  Notice Board Seating Chart (Row & Column Wise)
+                </span>
+
+                {/* Font Size Selector for Notice Board */}
+                <div className="flex items-center gap-1.5 ml-2 pl-3 border-l border-slate-300">
+                  <span className="text-xs font-bold text-slate-600">Roll No Size (फॉन्ट):</span>
+                  <div className="flex items-center bg-white rounded-lg border border-slate-300 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setFontSizeScale('large')}
+                      className={`px-2.5 py-1 text-xs font-bold rounded cursor-pointer ${
+                        fontSizeScale === 'large'
+                          ? 'bg-blue-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      Large
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFontSizeScale('extra-large')}
+                      className={`px-2.5 py-1 text-xs font-bold rounded cursor-pointer ${
+                        fontSizeScale === 'extra-large'
+                          ? 'bg-blue-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      XL (बड़ा)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFontSizeScale('jumbo')}
+                      className={`px-2.5 py-1 text-xs font-bold rounded cursor-pointer ${
+                        fontSizeScale === 'jumbo'
+                          ? 'bg-blue-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      Jumbo
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
                 >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Print Seating Chart</span>
+                  <Printer className="w-4 h-4" />
+                  <span>Print Notice Board Chart</span>
                 </button>
                 <button
                   type="button"
@@ -1035,67 +1011,167 @@ export const SittingArrangementView: React.FC = () => {
               </div>
             </div>
 
-            {/* Printable body */}
+            {/* Printable Notice Board Body */}
             <div className="p-8 overflow-y-auto print:p-0">
+              <style>{`
+                @media print {
+                  @page { size: landscape; margin: 8mm; }
+                  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                }
+              `}</style>
+
               <HeaderPrint
-                title={`EXAMINATION SEATING PLAN - ${currentHall?.hallName} (${currentPlan.hallId})`}
-                subtitle={`Examination: ${currentPlan.exam} | Academic Session: ${currentPlan.session} | Total Seated: ${occupiedSeatsCount}`}
+                title={`EXAMINATION SEATING CHART (NOTICE BOARD COPY)`}
+                subtitle={`${currentHall?.hallName ? `ROOM / HALL: ${currentHall.hallName} • ` : ''}Exam: ${currentPlan.exam} | Session: ${currentPlan.session} | Total Seated: ${occupiedSeatsCount}`}
                 exam={currentPlan.exam}
                 session={currentPlan.session}
               />
 
-              <div className="mb-4 text-xs font-semibold text-slate-700 flex justify-between">
-                <span>Room / Hall: {currentHall?.hallName}</span>
-                <span>Algorithm: {currentPlan.algorithm}</span>
-                <span>Status: {currentPlan.locked ? 'LOCKED / OFFICIAL' : 'DRAFT'}</span>
+              {/* Hall Info Bar */}
+              <div className="my-3 py-2 px-4 rounded-lg bg-slate-100 border border-slate-300 flex items-center justify-between text-xs font-bold text-slate-800 uppercase">
+                <span>Room / Hall: <strong className="text-blue-900 text-sm">{currentHall?.hallName} ({currentPlan.hallId})</strong></span>
+                <span>Arrangement: {currentHall?.rows} Rows × {currentHall?.columns} Columns</span>
+                <span>Seated: {occupiedSeatsCount} / {currentPlan.seats.length} Desks</span>
               </div>
 
-              {/* Table version for official notice board */}
-              <table className="w-full text-left text-xs border-collapse border border-slate-400">
-                <thead>
-                  <tr className="bg-slate-100 border-b border-slate-400 text-slate-900 font-bold uppercase text-[11px]">
-                    <th className="py-2 px-3 border border-slate-300 w-16 text-center">Seat</th>
-                    <th className="py-2 px-3 border border-slate-300 w-16">Class</th>
-                    <th className="py-2 px-3 border border-slate-300 w-16 text-center">Roll</th>
-                    <th className="py-2 px-3 border border-slate-300">Student Name</th>
-                    <th className="py-2 px-3 border border-slate-300">Student ID</th>
-                    <th className="py-2 px-3 border border-slate-300">Position Marker</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {currentPlan.seats
-                    .filter(s => s.studentName.trim() !== '')
-                    .map(seat => (
-                      <tr key={seat.seatNo} className="border-b border-slate-300">
-                        <td className="py-1.5 px-3 border border-slate-300 font-mono font-bold text-center">
-                          {seat.seatNo}
-                        </td>
-                        <td className="py-1.5 px-3 border border-slate-300 font-bold">
-                          {seat.className}
-                        </td>
-                        <td className="py-1.5 px-3 border border-slate-300 text-center font-semibold">
-                          {seat.rollNo}
-                        </td>
-                        <td className="py-1.5 px-3 border border-slate-300 font-semibold">
-                          {seat.studentName}
-                        </td>
-                        <td className="py-1.5 px-3 border border-slate-300 font-mono">
-                          {seat.studentId}
-                        </td>
-                        <td className="py-1.5 px-3 border border-slate-300 text-slate-600">
-                          {seat.doorWindow || 'Standard Desk'}
-                        </td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
+              {/* Front of Room marker */}
+              <div className="mb-3 py-1.5 text-center bg-slate-200 text-slate-800 text-xs font-black uppercase tracking-widest border border-slate-300 rounded">
+                ▲ BLACKBOARD / TEACHER'S DESK / FRONT OF EXAMINATION ROOM ▲
+              </div>
 
-              <div className="mt-12 flex justify-between text-center text-xs text-slate-600">
-                <div className="w-48 border-t border-slate-800 pt-1 font-semibold">
-                  Hall Superintendent Signature
+              {/* ROW & COLUMN WISE NOTICE BOARD TABLE (LARGE FONT CLASS & ROLL NO) */}
+              <div className="overflow-x-auto my-3">
+                <table className="w-full border-collapse border-2 border-black text-center">
+                  <thead>
+                    <tr className="bg-slate-200 border-b-2 border-black">
+                      <th className="border-2 border-black p-2 text-xs font-black text-black uppercase w-20 bg-slate-300">
+                        Row \ Col
+                      </th>
+                      {Array.from({ length: currentHall?.columns || 0 }, (_, cIdx) => {
+                        const colNum = cIdx + 1;
+                        const colSeats = currentPlan.seats.filter(s => s.column === colNum);
+                        const colClass =
+                          colSeats.find(s => s.className?.trim() !== '')?.className ||
+                          currentAssignedClasses[cIdx]?.className;
+
+                        return (
+                          <th
+                            key={colNum}
+                            className="border-2 border-black py-2 px-3 text-center bg-slate-100"
+                          >
+                            <div className="text-[10px] font-bold text-slate-600 uppercase">
+                              Col {colNum}
+                            </div>
+                            <div className="text-xs sm:text-sm font-black text-blue-900 uppercase truncate">
+                              {colClass || `Column ${colNum}`}
+                            </div>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: currentHall?.rows || 0 }, (_, rIdx) => {
+                      const rowNum = rIdx + 1;
+                      const rowSeats = seatsByRow[rowNum] || [];
+
+                      return (
+                        <tr key={rowNum} className="border-b-2 border-black">
+                          {/* Row Header */}
+                          <td className="border-2 border-black p-2 text-xs font-black text-black bg-slate-100 whitespace-nowrap">
+                            Row {rowNum}
+                          </td>
+
+                          {/* Column Desks */}
+                          {Array.from({ length: currentHall?.columns || 0 }, (_, cIdx) => {
+                            const colNum = cIdx + 1;
+                            const seat = rowSeats.find(s => s.column === colNum);
+                            const occupied = seat && seat.studentName.trim() !== '';
+                            const isDoor = seat && seat.doorWindow.includes('DOOR');
+                            const isWindow = seat && seat.doorWindow.includes('WINDOW');
+
+                            const rollFontSize =
+                              fontSizeScale === 'jumbo'
+                                ? 'text-4xl'
+                                : fontSizeScale === 'extra-large'
+                                ? 'text-3xl'
+                                : 'text-2xl';
+
+                            const classFontSize =
+                              fontSizeScale === 'jumbo'
+                                ? 'text-base'
+                                : fontSizeScale === 'extra-large'
+                                ? 'text-sm'
+                                : 'text-xs';
+
+                            return (
+                              <td
+                                key={colNum}
+                                className="border-2 border-black p-2 align-middle bg-white min-w-[105px] h-24"
+                              >
+                                {seat ? (
+                                  occupied ? (
+                                    <div className="flex flex-col items-center justify-center h-full">
+                                      {/* Seat coordinate and Door/Window indicator */}
+                                      <div className="w-full flex items-center justify-between text-[9px] font-mono font-bold text-slate-400 mb-0.5">
+                                        <span>{seat.seatNo}</span>
+                                        <div className="flex items-center gap-0.5">
+                                          {isDoor && <span className="text-red-700 bg-red-100 px-1 rounded font-extrabold text-[8px]">DOOR</span>}
+                                          {isWindow && <span className="text-sky-700 bg-sky-100 px-1 rounded font-extrabold text-[8px]">WIN</span>}
+                                        </div>
+                                      </div>
+
+                                      {/* SIRF CLASS (BOLD UPPERCASE) */}
+                                      <div className={`font-black text-blue-900 uppercase tracking-wide leading-tight ${classFontSize}`}>
+                                        {seat.className}
+                                      </div>
+
+                                      {/* SIRF ROLL NUMBER (LARGE FONT) */}
+                                      <div className="mt-0.5 flex items-baseline justify-center gap-1">
+                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                          ROLL
+                                        </span>
+                                        <span className={`font-black text-black font-mono tracking-tight leading-none ${rollFontSize}`}>
+                                          {seat.rollNo}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                                      <span className="text-[9px] font-mono">{seat.seatNo}</span>
+                                      <span className="text-xs font-bold mt-1">— VACANT —</span>
+                                    </div>
+                                  )
+                                ) : (
+                                  <span className="text-slate-300 text-xs">—</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Instructions and Signatures */}
+              <div className="mt-4 pt-3 border-t border-slate-300 flex flex-wrap items-center justify-between text-[11px] text-slate-600 gap-2">
+                <div>
+                  <strong>Notice to Students:</strong> Candidates must take their seats strictly according to their Class and Roll Number as indicated on this chart.
                 </div>
-                <div className="w-48 border-t border-slate-800 pt-1 font-semibold">
-                  Exam Controller Signature
+                <div className="flex items-center gap-4 text-xs font-bold">
+                  <span>[DOOR] = Door Side</span>
+                  <span>[WIN] = Window Side</span>
+                </div>
+              </div>
+
+              <div className="mt-12 flex justify-between text-center text-xs text-slate-800">
+                <div className="w-56 border-t-2 border-black pt-1 font-bold">
+                  Hall Superintendent / Invigilator
+                </div>
+                <div className="w-56 border-t-2 border-black pt-1 font-bold">
+                  Exam Controller / Center Superintendent
                 </div>
               </div>
             </div>
