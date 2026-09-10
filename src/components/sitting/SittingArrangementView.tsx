@@ -28,12 +28,13 @@ import {
 } from 'lucide-react';
 import { useSchool } from '../../context/SchoolContext';
 import { HeaderPrint } from '../common/HeaderPrint';
-import { SittingSeat } from '../../types';
+import { SittingSeat, Student, Hall, SittingArrangement } from '../../types';
 
 export const SittingArrangementView: React.FC = () => {
   const {
     settings,
     halls,
+    students,
     saveHall,
     getSittingPlan,
     generateSitting,
@@ -58,7 +59,7 @@ export const SittingArrangementView: React.FC = () => {
   // Dynamic Row & Column state requested by user
   const [customRows, setCustomRows] = useState<number>(5);
   const [customCols, setCustomCols] = useState<number>(8);
-  const [fontSizeScale, setFontSizeScale] = useState<'large' | 'extra-large' | 'jumbo'>('extra-large');
+  const [fontSizeScale, setFontSizeScale] = useState<'compact' | 'normal' | 'large' | 'extra-large' | 'jumbo'>('normal');
 
   // Interactive seat swap selection
   const [selectedSeatForSwap, setSelectedSeatForSwap] = useState<string | null>(null);
@@ -73,12 +74,13 @@ export const SittingArrangementView: React.FC = () => {
     mode: 'FILL_STUDENTS' | 'KEEP_ROLLS';
   } | null>(null);
 
-  // Editable Seat details state
+  // Editable Seat details state (with auto-generated name & student ID)
   const [editingSeat, setEditingSeat] = useState<{
     seatNo: string;
     className: string;
     rollNo: string;
     studentName: string;
+    studentId?: string;
   } | null>(null);
 
   // Door and Window configuration (editable at head)
@@ -92,12 +94,26 @@ export const SittingArrangementView: React.FC = () => {
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [showOverflowList, setShowOverflowList] = useState(false);
 
-  // Default hall selection
+  // Notice Board Print Mode (2 Halls in 1 A4 Page आधा-आधा or Single Hall)
+  const [printLayoutMode, setPrintLayoutMode] = useState<'TWO_HALLS' | 'SINGLE_HALL' | 'ALL_HALLS_PAIRED'>('TWO_HALLS');
+  const [secondHallId, setSecondHallId] = useState<string>('');
+
+  // Default hall selection & second hall pairing
   useEffect(() => {
-    if (halls.length > 0 && !selectedHallId) {
-      setSelectedHallId(halls[0].hallId);
+    if (halls.length > 0) {
+      if (!selectedHallId) {
+        setSelectedHallId(halls[0].hallId);
+      }
+      if (!secondHallId || secondHallId === selectedHallId) {
+        const other = halls.find(h => h.hallId !== (selectedHallId || halls[0].hallId));
+        if (other) {
+          setSecondHallId(other.hallId);
+        } else {
+          setSecondHallId(halls[0].hallId);
+        }
+      }
     }
-  }, [halls, selectedHallId]);
+  }, [halls, selectedHallId, secondHallId]);
 
   const currentHall = halls.find(h => h.hallId === selectedHallId);
   const currentPlan = selectedHallId ? getSittingPlan(exam, session, selectedHallId) : undefined;
@@ -252,20 +268,138 @@ export const SittingArrangementView: React.FC = () => {
     setEditingColumn(null);
   };
 
+  // Auto-generate or match student name when class is changed in Desk Edit modal
+  const handleSeatClassChange = (newClass: string) => {
+    if (!editingSeat) return;
+    const cleanClass = newClass.trim().toUpperCase();
+    const currentRoll = editingSeat.rollNo.trim();
+
+    let autoName = '';
+    let autoId = '';
+    if (cleanClass && currentRoll) {
+      const match = students.find(
+        s => s.className.trim().toUpperCase() === cleanClass &&
+             (s.rollNo.trim() === currentRoll || Number(s.rollNo) === Number(currentRoll))
+      );
+      if (match) {
+        autoName = match.name;
+        autoId = match.studentId;
+      } else {
+        autoName = `Student ${cleanClass}-${currentRoll}`;
+        autoId = `STU-${cleanClass}-${currentRoll}`;
+      }
+    }
+
+    setEditingSeat(prev =>
+      prev
+        ? {
+            ...prev,
+            className: newClass,
+            studentName: autoName || prev.studentName,
+            studentId: autoId || prev.studentId
+          }
+        : null
+    );
+  };
+
+  // Auto-generate or match student name when roll number is changed in Desk Edit modal
+  const handleSeatRollChange = (newRoll: string) => {
+    if (!editingSeat) return;
+    const cleanRoll = newRoll.trim();
+    const cleanClass = editingSeat.className.trim().toUpperCase();
+
+    let autoName = '';
+    let autoId = '';
+    if (cleanClass && cleanRoll) {
+      const match = students.find(
+        s => s.className.trim().toUpperCase() === cleanClass &&
+             (s.rollNo.trim() === cleanRoll || Number(s.rollNo) === Number(cleanRoll))
+      );
+      if (match) {
+        autoName = match.name;
+        autoId = match.studentId;
+      } else {
+        autoName = `Student ${cleanClass}-${cleanRoll}`;
+        autoId = `STU-${cleanClass}-${cleanRoll}`;
+      }
+    } else if (cleanRoll) {
+      autoName = `Student Roll ${cleanRoll}`;
+      autoId = `STU-${cleanRoll}`;
+    }
+
+    setEditingSeat(prev =>
+      prev
+        ? {
+            ...prev,
+            rollNo: newRoll,
+            studentName: autoName || prev.studentName,
+            studentId: autoId || prev.studentId
+          }
+        : null
+    );
+  };
+
+  // Quick select a registered student for the desk
+  const handleSelectStudentForSeat = (st: Student) => {
+    if (!editingSeat) return;
+    setEditingSeat(prev =>
+      prev
+        ? {
+            ...prev,
+            className: st.className,
+            rollNo: st.rollNo,
+            studentName: st.name,
+            studentId: st.studentId
+          }
+        : null
+    );
+  };
+
+  const handleClearSeat = () => {
+    if (!editingSeat || !selectedHallId) return;
+    emptySeat(exam, session, selectedHallId, editingSeat.seatNo);
+    setMessage({
+      type: 'info',
+      text: `Desk ${editingSeat.seatNo} cleared (vacant).`
+    });
+    setEditingSeat(null);
+  };
+
   const handleSaveSeatDetails = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingSeat || !selectedHallId) return;
 
+    const cleanClass = editingSeat.className.trim().toUpperCase();
+    const cleanRoll = editingSeat.rollNo.trim();
+    let finalName = editingSeat.studentName.trim();
+    let finalId = editingSeat.studentId?.trim();
+
+    // Auto generate if name wasn't provided
+    if (cleanClass && cleanRoll && (!finalName || finalName === '')) {
+      const match = students.find(
+        s => s.className.trim().toUpperCase() === cleanClass &&
+             (s.rollNo.trim() === cleanRoll || Number(s.rollNo) === Number(cleanRoll))
+      );
+      if (match) {
+        finalName = match.name;
+        finalId = match.studentId;
+      } else {
+        finalName = `Student ${cleanClass}-${cleanRoll}`;
+        finalId = `STU-${cleanClass}-${cleanRoll}`;
+      }
+    }
+
     const res = updateSeatDetails(exam, session, selectedHallId, editingSeat.seatNo, {
-      className: editingSeat.className.trim().toUpperCase(),
-      rollNo: editingSeat.rollNo.trim(),
-      studentName: editingSeat.studentName.trim()
+      className: cleanClass,
+      rollNo: cleanRoll,
+      studentName: finalName,
+      studentId: finalId
     });
 
     if (res.success) {
       setMessage({
         type: 'success',
-        text: `Desk ${editingSeat.seatNo} details successfully updated (Class: ${editingSeat.className.trim().toUpperCase()}, Roll: ${editingSeat.rollNo.trim()}).`
+        text: `Desk ${editingSeat.seatNo} details successfully updated (Class: ${cleanClass}, Roll: ${cleanRoll}, Name: ${finalName}).`
       });
     }
     setEditingSeat(null);
@@ -1269,77 +1403,149 @@ export const SittingArrangementView: React.FC = () => {
         )}
       </div>
 
-      {/* Notice Board Printable Modal */}
-      {showPrintModal && currentPlan && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-6xl w-full max-h-[95vh] shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      {/* Notice Board Printable Modal (Supports 2 Halls per A4 Page आधा-आधा and Single Hall) */}
+      {showPrintModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/70 backdrop-blur-xs print-modal-container">
+          <div className="bg-white rounded-2xl max-w-6xl w-full max-h-[96vh] shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 print:border-none print:shadow-none print:max-w-none print:max-h-none print:rounded-none">
             {/* Modal header bar */}
-            <div className="px-6 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between print:hidden flex-wrap gap-3">
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-                  <Grid3X3 className="w-4 h-4 text-blue-600" />
-                  Notice Board Seating Chart (Row & Column Wise)
-                </span>
+            <div className="px-5 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between print:hidden flex-wrap gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Grid3X3 className="w-5 h-5 text-blue-600" />
+                  <span className="text-sm font-black text-slate-800 uppercase tracking-wide">
+                    Notice Board Seating Chart (सूचना पट्ट)
+                  </span>
+                </div>
 
-                {/* Font Size Selector for Notice Board */}
-                <div className="flex items-center gap-1.5 ml-2 pl-3 border-l border-slate-300">
-                  <span className="text-xs font-bold text-slate-600">Roll No Size (फॉन्ट):</span>
+                {/* Print Layout Mode Selector */}
+                <div className="flex items-center bg-white rounded-xl border border-slate-300 p-0.5 shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setPrintLayoutMode('TWO_HALLS')}
+                    className={`px-3 py-1.5 text-xs font-black rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 ${
+                      printLayoutMode === 'TWO_HALLS'
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'text-slate-700 hover:bg-slate-100'
+                    }`}
+                    title="A4 पेज में 2 हॉल आधा-आधा प्रिंट करें"
+                  >
+                    <span>📄 2 Halls in 1 A4 (आधा-आधा)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPrintLayoutMode('SINGLE_HALL')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 ${
+                      printLayoutMode === 'SINGLE_HALL'
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>Full Page (1 Hall)</span>
+                  </button>
+                  {halls.length > 2 && (
+                    <button
+                      type="button"
+                      onClick={() => setPrintLayoutMode('ALL_HALLS_PAIRED')}
+                      className={`px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition-colors flex items-center gap-1.5 ${
+                        printLayoutMode === 'ALL_HALLS_PAIRED'
+                          ? 'bg-blue-600 text-white shadow-2xs'
+                          : 'text-slate-700 hover:bg-slate-100'
+                      }`}
+                      title="सभी परीक्षा हॉल को 2-2 आधा-आधा A4 शीट में प्रिंट करें"
+                    >
+                      <span>📑 All Halls (2 per Page)</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* In TWO_HALLS mode: Room Selectors */}
+                {printLayoutMode === 'TWO_HALLS' && (
+                  <div className="flex items-center gap-2 pl-2 border-l border-slate-300">
+                    <div className="flex items-center gap-1 text-xs">
+                      <span className="font-bold text-slate-600">Top Hall (ऊपर):</span>
+                      <select
+                        value={selectedHallId}
+                        onChange={e => setSelectedHallId(e.target.value)}
+                        className="px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-bold text-blue-900"
+                      >
+                        {halls.map(h => (
+                          <option key={h.hallId} value={h.hallId}>
+                            {h.hallName} ({h.rows}R×{h.columns}C)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const temp = selectedHallId;
+                        setSelectedHallId(secondHallId || halls[0]?.hallId || '');
+                        setSecondHallId(temp);
+                      }}
+                      className="p-1 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 cursor-pointer"
+                      title="Swap Top and Bottom Halls"
+                    >
+                      ⇄
+                    </button>
+
+                    <div className="flex items-center gap-1 text-xs">
+                      <span className="font-bold text-slate-600">Bottom Hall (नीचे):</span>
+                      <select
+                        value={secondHallId || (halls.find(h => h.hallId !== selectedHallId)?.hallId || selectedHallId)}
+                        onChange={e => setSecondHallId(e.target.value)}
+                        className="px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs font-bold text-blue-900"
+                      >
+                        {halls.map(h => (
+                          <option key={h.hallId} value={h.hallId}>
+                            {h.hallName} ({h.rows}R×{h.columns}C)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {/* Font Size Selector */}
+                <div className="flex items-center gap-1 pl-2 border-l border-slate-300">
+                  <span className="text-xs font-bold text-slate-600">Roll Font:</span>
                   <div className="flex items-center bg-white rounded-lg border border-slate-300 p-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setFontSizeScale('large')}
-                      className={`px-2.5 py-1 text-xs font-bold rounded cursor-pointer ${
-                        fontSizeScale === 'large'
-                          ? 'bg-blue-600 text-white shadow-2xs'
-                          : 'text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      Large
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFontSizeScale('extra-large')}
-                      className={`px-2.5 py-1 text-xs font-bold rounded cursor-pointer ${
-                        fontSizeScale === 'extra-large'
-                          ? 'bg-blue-600 text-white shadow-2xs'
-                          : 'text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      XL (बड़ा)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setFontSizeScale('jumbo')}
-                      className={`px-2.5 py-1 text-xs font-bold rounded cursor-pointer ${
-                        fontSizeScale === 'jumbo'
-                          ? 'bg-blue-600 text-white shadow-2xs'
-                          : 'text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      Jumbo
-                    </button>
+                    {(['compact', 'normal', 'large', 'extra-large'] as const).map(scale => (
+                      <button
+                        key={scale}
+                        type="button"
+                        onClick={() => setFontSizeScale(scale)}
+                        className={`px-2 py-1 text-[11px] font-bold rounded cursor-pointer capitalize ${
+                          fontSizeScale === scale
+                            ? 'bg-blue-600 text-white shadow-2xs'
+                            : 'text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {scale}
+                      </button>
+                    ))}
                   </div>
+                </div>
 
-                  {/* Quick Door/Window Controls for Notice Board */}
-                  <div className="flex items-center gap-1.5 print:hidden">
-                    <button
-                      type="button"
-                      onClick={handleSwapDoorWindow}
-                      className="px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors shadow-2xs"
-                      title="Swap Door and Window Sides"
-                    >
-                      ⇄ Swap Door & Window
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowDoorWindowModal(true)}
-                      className="px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors shadow-2xs"
-                      title="Edit Door & Window Labels"
-                    >
-                      <Edit2 className="w-3 h-3 inline mr-1" />
-                      Edit Door/Window
-                    </button>
-                  </div>
+                {/* Quick Door/Window Controls */}
+                <div className="flex items-center gap-1.5 print:hidden">
+                  <button
+                    type="button"
+                    onClick={handleSwapDoorWindow}
+                    className="px-2 py-1 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors shadow-2xs"
+                    title="Swap Door and Window Sides"
+                  >
+                    ⇄ Swap Door & Window
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowDoorWindowModal(true)}
+                    className="px-2 py-1 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors shadow-2xs"
+                    title="Edit Door & Window Labels"
+                  >
+                    <Edit2 className="w-3 h-3 inline mr-1" />
+                    Labels
+                  </button>
                 </div>
               </div>
 
@@ -1347,10 +1553,10 @@ export const SittingArrangementView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-xs"
                 >
                   <Printer className="w-4 h-4" />
-                  <span>Print Notice Board Chart</span>
+                  <span>Print Now</span>
                 </button>
                 <button
                   type="button"
@@ -1363,249 +1569,437 @@ export const SittingArrangementView: React.FC = () => {
             </div>
 
             {/* Printable Notice Board Body */}
-            <div className="p-8 overflow-y-auto print:p-0">
+            <div className="p-4 sm:p-6 overflow-y-auto print:p-0">
               <style>{`
                 @media print {
-                  @page { size: landscape; margin: 8mm; }
-                  body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                  @page {
+                    size: ${printLayoutMode === 'TWO_HALLS' || printLayoutMode === 'ALL_HALLS_PAIRED' ? 'A4 portrait' : 'landscape'};
+                    margin: 4mm;
+                  }
+                  body {
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                  }
+                  .print-modal-container {
+                    position: static !important;
+                    inset: auto !important;
+                    background: transparent !important;
+                    padding: 0 !important;
+                    overflow: visible !important;
+                  }
+                  .a4-page-sheet {
+                    page-break-after: always;
+                    page-break-inside: avoid;
+                    break-after: page;
+                    break-inside: avoid;
+                    height: 287mm !important;
+                    max-height: 287mm !important;
+                    box-sizing: border-box !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                    justify-content: space-between !important;
+                    padding: 2mm 0 !important;
+                    margin: 0 auto !important;
+                    overflow: hidden !important;
+                  }
+                  .a4-half-block {
+                    height: 48.5% !important;
+                    max-height: 48.5% !important;
+                    box-sizing: border-box !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                    justify-content: space-between !important;
+                    border: 1.5px solid #000 !important;
+                    border-radius: 6px !important;
+                    padding: 2.5mm !important;
+                    overflow: hidden !important;
+                  }
+                  .a4-cut-divider {
+                    height: 2.5% !important;
+                    margin: 1mm 0 !important;
+                    border-top: 1.5px dashed #475569 !important;
+                    border-bottom: 1.5px dashed #475569 !important;
+                  }
+                  .a4-single-full-page {
+                    page-break-after: always;
+                    page-break-inside: avoid;
+                    break-after: page;
+                    break-inside: avoid;
+                    min-height: 280mm !important;
+                    box-sizing: border-box !important;
+                    padding: 4mm !important;
+                  }
                 }
               `}</style>
 
-              <HeaderPrint
-                title={`EXAMINATION SEATING CHART (NOTICE BOARD COPY)`}
-                subtitle={`${currentHall?.hallName ? `ROOM / HALL: ${currentHall.hallName} • ` : ''}Exam: ${currentPlan.exam} | Session: ${currentPlan.session} | Total Seated: ${occupiedSeatsCount}`}
-                exam={currentPlan.exam}
-                session={currentPlan.session}
-              />
+              {/* Helper function to render a single hall chart */}
+              {(() => {
+                const renderHallChart = (
+                  targetHall: Hall | undefined,
+                  isHalfPage: boolean
+                ) => {
+                  if (!targetHall) {
+                    return (
+                      <div className="p-8 text-center text-slate-400 font-bold border-2 border-dashed border-slate-300 rounded-xl">
+                        No Hall Selected
+                      </div>
+                    );
+                  }
 
-              {/* Hall Info Bar */}
-              <div className="my-3 py-2 px-4 rounded-lg bg-slate-100 border border-slate-300 flex items-center justify-between text-xs font-bold text-slate-800 uppercase">
-                <span>Room / Hall: <strong className="text-blue-900 text-sm">{currentHall?.hallName} ({currentPlan.hallId})</strong></span>
-                <span>
-                  Arrangement: {currentHall?.rows} Rows × {currentHall?.columns} Columns
-                  {shouldSplit ? ` (Splits into 2 Parts: ${splitCol}+${totalCols - splitCol} with Central Aisle)` : ''}
-                </span>
-                <span>Seated: {occupiedSeatsCount} / {currentPlan.seats.length} Desks</span>
-              </div>
+                  const hallPlan = getSittingPlan(exam, session, targetHall.hallId);
+                  const hallSeats = hallPlan?.seats || [];
+                  const hallOccupiedCount = hallSeats.filter(
+                    s => s.studentName && s.studentName.trim() !== ''
+                  ).length;
+                  const hallCols = targetHall.columns || 0;
+                  const hallRows = targetHall.rows || 0;
+                  const hallShouldSplit = hallCols >= 4;
+                  const hallSplitCol = Math.ceil(hallCols / 2);
+                  const hallAssignedClasses = getHallClasses(exam, session, targetHall.hallId);
 
-              {/* Notice Board Head: Door | Blackboard | Window */}
-              <div className="my-3 grid grid-cols-12 items-stretch border-2 border-black rounded-lg overflow-hidden bg-white text-black font-bold">
-                {/* Left Head */}
-                <div className={`col-span-3 p-2.5 border-r-2 border-black flex items-center justify-center gap-2 ${
-                  doorSide === 'LEFT' ? 'bg-red-50 text-red-950' : 'bg-sky-50 text-sky-950'
-                }`}>
-                  <span className="text-xl">{doorSide === 'LEFT' ? '🚪' : '🪟'}</span>
-                  <div className="text-center">
-                    <div className="text-xs font-black uppercase tracking-wide">
-                      {doorSide === 'LEFT' ? doorLabel : windowLabel}
-                    </div>
-                    <div className="text-[9px] text-slate-600 font-medium">
-                      {doorSide === 'LEFT' ? '(प्रवेश द्वार / ENTRANCE)' : '(हवा / VENTILATION)'}
-                    </div>
-                  </div>
-                </div>
+                  const rowMap: Record<number, SittingSeat[]> = {};
+                  hallSeats.forEach(seat => {
+                    if (!rowMap[seat.row]) rowMap[seat.row] = [];
+                    rowMap[seat.row].push(seat);
+                  });
 
-                {/* Center Head */}
-                <div className="col-span-6 p-2 text-center bg-slate-200 flex flex-col items-center justify-center">
-                  <div className="text-xs sm:text-sm font-black uppercase tracking-widest text-slate-900">
-                    ▲ BLACKBOARD / TEACHER'S DESK / FRONT OF EXAMINATION ROOM ▲
-                  </div>
-                  <div className="text-[10px] text-slate-700 font-bold mt-0.5">
-                    {shouldSplit
-                      ? `PART 1 (COLS 1 TO ${splitCol})  •  [CENTRAL WALKWAY / रास्ता]  •  PART 2 (COLS ${splitCol + 1} TO ${totalCols})`
-                      : `EXAMINATION SEATING MATRIX`}
-                  </div>
-                </div>
+                  const rollFontSize =
+                    fontSizeScale === 'jumbo'
+                      ? isHalfPage ? 'text-2xl print:text-xl' : 'text-4xl'
+                      : fontSizeScale === 'extra-large'
+                      ? isHalfPage ? 'text-xl print:text-lg' : 'text-3xl'
+                      : fontSizeScale === 'large'
+                      ? isHalfPage ? 'text-lg print:text-base' : 'text-2xl'
+                      : fontSizeScale === 'normal'
+                      ? isHalfPage ? 'text-base print:text-sm' : 'text-xl'
+                      : isHalfPage ? 'text-sm print:text-xs' : 'text-lg';
 
-                {/* Right Head */}
-                <div className={`col-span-3 p-2.5 border-l-2 border-black flex items-center justify-center gap-2 ${
-                  windowSide === 'RIGHT' ? 'bg-sky-50 text-sky-950' : 'bg-red-50 text-red-950'
-                }`}>
-                  <span className="text-xl">{windowSide === 'RIGHT' ? '🪟' : '🚪'}</span>
-                  <div className="text-center">
-                    <div className="text-xs font-black uppercase tracking-wide">
-                      {windowSide === 'RIGHT' ? windowLabel : doorLabel}
-                    </div>
-                    <div className="text-[9px] text-slate-600 font-medium">
-                      {windowSide === 'RIGHT' ? '(हवा / VENTILATION)' : '(प्रवेश द्वार / ENTRANCE)'}
-                    </div>
-                  </div>
-                </div>
-              </div>
+                  const classFontSize =
+                    fontSizeScale === 'jumbo'
+                      ? isHalfPage ? 'text-xs print:text-[11px]' : 'text-base'
+                      : fontSizeScale === 'extra-large'
+                      ? isHalfPage ? 'text-[11px] print:text-[10px]' : 'text-sm'
+                      : fontSizeScale === 'large'
+                      ? isHalfPage ? 'text-[10px] print:text-[9px]' : 'text-xs'
+                      : isHalfPage ? 'text-[9px] print:text-[8px]' : 'text-xs';
 
-              {/* ROW & COLUMN WISE NOTICE BOARD TABLE (LARGE FONT CLASS & ROLL NO) */}
-              <div className="overflow-x-auto my-3">
-                <table className="w-full border-collapse border-2 border-black text-center">
-                  <thead>
-                    <tr className="bg-slate-200 border-b-2 border-black">
-                      <th className="border-2 border-black p-2 text-xs font-black text-black uppercase w-20 bg-slate-300">
-                        Row \ Col
-                      </th>
-                      {Array.from({ length: currentHall?.columns || 0 }, (_, cIdx) => {
-                        const colNum = cIdx + 1;
-                        const colSeats = currentPlan.seats.filter(s => s.column === colNum);
-                        const colClass =
-                          colSeats.find(s => s.className?.trim() !== '')?.className ||
-                          currentAssignedClasses[cIdx]?.className;
+                  const cellHeightClass = isHalfPage
+                    ? 'h-11 sm:h-12 print:h-10'
+                    : 'h-24';
 
-                        return (
-                          <React.Fragment key={colNum}>
-                            {/* Central Aisle Header in Notice Board between Part 1 and Part 2 */}
-                            {shouldSplit && colNum === splitCol + 1 && (
-                              <th className="border-2 border-black py-2 px-1 text-center bg-amber-100 text-amber-950 w-16 text-[10px] font-black uppercase">
-                                <div>AISLE</div>
-                                <div className="text-[8px] font-bold">गैलरी / रास्ता</div>
-                              </th>
+                  return (
+                    <div className={`notice-board-hall-chart flex flex-col justify-between ${isHalfPage ? 'h-full' : ''}`}>
+                      {/* Top Title Bar */}
+                      {isHalfPage ? (
+                        <div className="border-b-2 border-black pb-1 mb-1 text-center">
+                          <div className="flex items-center justify-between px-1">
+                            <span className="text-[10px] font-black text-slate-700 uppercase">
+                              {exam} • {session}
+                            </span>
+                            <h2 className="text-xs sm:text-sm font-black tracking-wide text-black uppercase">
+                              {settings.schoolName || 'EXAMINATION SEATING CHART'}
+                            </h2>
+                            <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-900 border border-blue-300 text-[10px] font-black uppercase">
+                              HALL: {targetHall.hallName}
+                            </span>
+                          </div>
+                          <div className="text-[9px] text-slate-700 font-bold uppercase tracking-wider mt-0.5 flex items-center justify-center gap-3">
+                            <span><strong>ROOM ID:</strong> {targetHall.hallId}</span>
+                            <span>•</span>
+                            <span><strong>CAPACITY:</strong> {hallRows}R × {hallCols}C ({hallRows * hallCols} Desks)</span>
+                            <span>•</span>
+                            <span><strong>SEATED:</strong> {hallOccupiedCount} Candidates</span>
+                            {hallShouldSplit && (
+                              <>
+                                <span>•</span>
+                                <span className="text-blue-800">
+                                  <strong>2 PARTS:</strong> {hallSplitCol}+{hallCols - hallSplitCol} + AISLE
+                                </span>
+                              </>
                             )}
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <HeaderPrint
+                            title={`EXAMINATION SEATING CHART (NOTICE BOARD COPY)`}
+                            subtitle={`${targetHall.hallName ? `ROOM / HALL: ${targetHall.hallName} • ` : ''}Exam: ${exam} | Session: ${session} | Total Seated: ${hallOccupiedCount}`}
+                            exam={exam}
+                            session={session}
+                          />
+                          <div className="my-3 py-2 px-4 rounded-lg bg-slate-100 border border-slate-300 flex items-center justify-between text-xs font-bold text-slate-800 uppercase">
+                            <span>Room / Hall: <strong className="text-blue-900 text-sm">{targetHall.hallName} ({targetHall.hallId})</strong></span>
+                            <span>
+                              Arrangement: {hallRows} Rows × {hallCols} Columns
+                              {hallShouldSplit ? ` (Splits into 2 Parts: ${hallSplitCol}+${hallCols - hallSplitCol} with Central Aisle)` : ''}
+                            </span>
+                            <span>Seated: {hallOccupiedCount} / {hallRows * hallCols} Desks</span>
+                          </div>
+                        </>
+                      )}
 
-                            <th
-                              className="border-2 border-black py-2 px-3 text-center bg-slate-100 relative group"
-                            >
-                              <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-slate-600 uppercase">
-                                <span>Col {colNum}</span>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setEditingColumn({
-                                      colNum,
-                                      currentClass: colClass || '',
-                                      customClassName: colClass || '',
-                                      targetScope: 'SINGLE',
-                                      mode: 'FILL_STUDENTS'
-                                    })
-                                  }
-                                  title={`Edit Class for Column ${colNum} and relative desks`}
-                                  className="print:hidden opacity-60 group-hover:opacity-100 p-0.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded cursor-pointer transition-opacity"
-                                >
-                                  <Edit2 className="w-2.5 h-2.5" />
-                                </button>
-                              </div>
-                              <div className="text-xs sm:text-sm font-black text-blue-900 uppercase truncate">
-                                {colClass || `Column ${colNum}`}
-                              </div>
-                            </th>
-                          </React.Fragment>
-                        );
-                      })}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Array.from({ length: currentHall?.rows || 0 }, (_, rIdx) => {
-                      const rowNum = rIdx + 1;
-                      const rowSeats = seatsByRow[rowNum] || [];
+                      {/* Head: Door | Blackboard | Window */}
+                      <div className={`grid grid-cols-12 items-stretch border-2 border-black rounded-lg overflow-hidden bg-white text-black font-bold ${isHalfPage ? 'my-1' : 'my-2.5'}`}>
+                        {/* Left Head */}
+                        <div className={`col-span-3 border-r-2 border-black flex items-center justify-center gap-1.5 ${isHalfPage ? 'p-1' : 'p-2'} ${
+                          doorSide === 'LEFT' ? 'bg-red-50 text-red-950' : 'bg-sky-50 text-sky-950'
+                        }`}>
+                          <span className={isHalfPage ? 'text-base' : 'text-xl'}>{doorSide === 'LEFT' ? '🚪' : '🪟'}</span>
+                          <div className="text-center">
+                            <div className={`${isHalfPage ? 'text-[9px]' : 'text-xs'} font-black uppercase tracking-wide`}>
+                              {doorSide === 'LEFT' ? doorLabel : windowLabel}
+                            </div>
+                            <div className={`${isHalfPage ? 'text-[7px]' : 'text-[9px]'} text-slate-600 font-medium`}>
+                              {doorSide === 'LEFT' ? '(प्रवेश द्वार)' : '(खिड़की)'}
+                            </div>
+                          </div>
+                        </div>
 
-                      return (
-                        <tr key={rowNum} className="border-b-2 border-black">
-                          {/* Row Header */}
-                          <td className="border-2 border-black p-2 text-xs font-black text-black bg-slate-100 whitespace-nowrap">
-                            Row {rowNum}
-                          </td>
+                        {/* Center Head */}
+                        <div className={`col-span-6 text-center bg-slate-200 flex flex-col items-center justify-center ${isHalfPage ? 'p-1' : 'p-2'}`}>
+                          <div className={`${isHalfPage ? 'text-[10px]' : 'text-xs sm:text-sm'} font-black uppercase tracking-widest text-slate-900`}>
+                            ▲ BLACKBOARD / FRONT OF EXAMINATION ROOM ▲
+                          </div>
+                          <div className={`${isHalfPage ? 'text-[8px]' : 'text-[10px]'} text-slate-700 font-bold mt-0.5`}>
+                            {hallShouldSplit
+                              ? `PART 1 (COLS 1-${hallSplitCol}) • [AISLE / रास्ता] • PART 2 (COLS ${hallSplitCol + 1}-${hallCols})`
+                              : `EXAMINATION SEATING MATRIX`}
+                          </div>
+                        </div>
 
-                          {/* Column Desks */}
-                          {Array.from({ length: currentHall?.columns || 0 }, (_, cIdx) => {
-                            const colNum = cIdx + 1;
-                            const seat = rowSeats.find(s => s.column === colNum);
-                            const occupied = seat && seat.studentName.trim() !== '';
-                            const { isDoor, isWindow } = seat
-                              ? getSeatDoorWindowStatus(seat, currentHall?.columns || 0)
-                              : { isDoor: false, isWindow: false };
+                        {/* Right Head */}
+                        <div className={`col-span-3 border-l-2 border-black flex items-center justify-center gap-1.5 ${isHalfPage ? 'p-1' : 'p-2'} ${
+                          windowSide === 'RIGHT' ? 'bg-sky-50 text-sky-950' : 'bg-red-50 text-red-950'
+                        }`}>
+                          <span className={isHalfPage ? 'text-base' : 'text-xl'}>{windowSide === 'RIGHT' ? '🪟' : '🚪'}</span>
+                          <div className="text-center">
+                            <div className={`${isHalfPage ? 'text-[9px]' : 'text-xs'} font-black uppercase tracking-wide`}>
+                              {windowSide === 'RIGHT' ? windowLabel : doorLabel}
+                            </div>
+                            <div className={`${isHalfPage ? 'text-[7px]' : 'text-[9px]'} text-slate-600 font-medium`}>
+                              {windowSide === 'RIGHT' ? '(खिड़की)' : '(प्रवेश द्वार)'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
 
-                            const rollFontSize =
-                              fontSizeScale === 'jumbo'
-                                ? 'text-4xl'
-                                : fontSizeScale === 'extra-large'
-                                ? 'text-3xl'
-                                : 'text-2xl';
+                      {/* Seating Table */}
+                      <div className={`overflow-x-auto ${isHalfPage ? 'my-0.5' : 'my-2'}`}>
+                        <table className="w-full border-collapse border-2 border-black text-center">
+                          <thead>
+                            <tr className="bg-slate-200 border-b-2 border-black">
+                              <th className={`border-2 border-black text-black uppercase bg-slate-300 ${isHalfPage ? 'p-0.5 text-[8px] w-12' : 'p-2 text-xs w-20'}`}>
+                                Row \ Col
+                              </th>
+                              {Array.from({ length: hallCols }, (_, cIdx) => {
+                                const colNum = cIdx + 1;
+                                const colSeats = hallSeats.filter(s => s.column === colNum);
+                                const colClass =
+                                  colSeats.find(s => s.className?.trim() !== '')?.className ||
+                                  hallAssignedClasses[cIdx]?.className;
 
-                            const classFontSize =
-                              fontSizeScale === 'jumbo'
-                                ? 'text-base'
-                                : fontSizeScale === 'extra-large'
-                                ? 'text-sm'
-                                : 'text-xs';
+                                return (
+                                  <React.Fragment key={colNum}>
+                                    {/* Central Aisle Header */}
+                                    {hallShouldSplit && colNum === hallSplitCol + 1 && (
+                                      <th className={`border-2 border-black text-center bg-amber-100 text-amber-950 font-black uppercase ${isHalfPage ? 'p-0.5 w-10 text-[7px]' : 'py-2 px-1 w-16 text-[10px]'}`}>
+                                        <div>AISLE</div>
+                                        <div className={isHalfPage ? 'text-[6px]' : 'text-[8px]'}>रास्ता</div>
+                                      </th>
+                                    )}
 
-                            return (
-                              <React.Fragment key={colNum}>
-                                {/* Central Aisle Cell in Notice Board between Part 1 and Part 2 */}
-                                {shouldSplit && colNum === splitCol + 1 && (
-                                  <td className="border-2 border-black bg-slate-100 text-center align-middle w-16 p-1">
-                                    <div className="flex flex-col items-center justify-center font-mono text-slate-500">
-                                      <span className="text-[8px] font-black tracking-widest uppercase">AISLE</span>
-                                      <span className="text-[7px] text-slate-400">गैलरी / रास्ता</span>
-                                      <span className="text-slate-400 font-mono text-xs">║</span>
-                                    </div>
+                                    <th className={`border-2 border-black text-center bg-slate-100 relative group ${isHalfPage ? 'p-0.5' : 'py-2 px-3'}`}>
+                                      <div className={`flex items-center justify-center gap-1 font-bold text-slate-600 uppercase ${isHalfPage ? 'text-[7px]' : 'text-[10px]'}`}>
+                                        <span>Col {colNum}</span>
+                                      </div>
+                                      <div className={`font-black text-blue-900 uppercase truncate ${isHalfPage ? 'text-[9px] leading-tight' : 'text-xs sm:text-sm'}`}>
+                                        {colClass || `Col ${colNum}`}
+                                      </div>
+                                    </th>
+                                  </React.Fragment>
+                                );
+                              })}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Array.from({ length: hallRows }, (_, rIdx) => {
+                              const rowNum = rIdx + 1;
+                              const rowSeats = rowMap[rowNum] || [];
+
+                              return (
+                                <tr key={rowNum} className="border-b-2 border-black">
+                                  {/* Row Header */}
+                                  <td className={`border-2 border-black font-black text-black bg-slate-100 whitespace-nowrap ${isHalfPage ? 'p-0.5 text-[8px]' : 'p-2 text-xs'}`}>
+                                    R{rowNum}
                                   </td>
-                                )}
 
-                                <td
-                                  className="border-2 border-black p-2 align-middle bg-white min-w-[105px] h-24"
-                                >
-                                  {seat ? (
-                                    occupied ? (
-                                      <div className="flex flex-col items-center justify-center h-full">
-                                        {/* Seat coordinate and Door/Window indicator */}
-                                        <div className="w-full flex items-center justify-between text-[9px] font-mono font-bold text-slate-400 mb-0.5">
-                                          <span>{seat.seatNo}</span>
-                                          <div className="flex items-center gap-0.5">
-                                            {isDoor && <span className="text-red-700 bg-red-100 px-1 rounded font-extrabold text-[8px]" title="Door Entrance Desk">DOOR</span>}
-                                            {isWindow && <span className="text-sky-700 bg-sky-100 px-1 rounded font-extrabold text-[8px]" title="Window Desk">WIN</span>}
-                                          </div>
-                                        </div>
+                                  {/* Desks */}
+                                  {Array.from({ length: hallCols }, (_, cIdx) => {
+                                    const colNum = cIdx + 1;
+                                    const seat = rowSeats.find(s => s.column === colNum);
+                                    const occupied = seat && seat.studentName.trim() !== '';
+                                    const { isDoor, isWindow } = seat
+                                      ? getSeatDoorWindowStatus(seat, hallCols)
+                                      : { isDoor: false, isWindow: false };
 
-                                        {/* SIRF CLASS (BOLD UPPERCASE) */}
-                                        <div className={`font-black text-blue-900 uppercase tracking-wide leading-tight ${classFontSize}`}>
-                                          {seat.className}
-                                        </div>
+                                    return (
+                                      <React.Fragment key={colNum}>
+                                        {/* Central Aisle Cell */}
+                                        {hallShouldSplit && colNum === hallSplitCol + 1 && (
+                                          <td className={`border-2 border-black bg-slate-100 text-center align-middle ${isHalfPage ? 'p-0.5 w-10' : 'p-1 w-16'}`}>
+                                            <div className="flex flex-col items-center justify-center font-mono text-slate-500">
+                                              <span className={`${isHalfPage ? 'text-[6px]' : 'text-[8px]'} font-black uppercase`}>AISLE</span>
+                                              <span className="text-slate-400 font-mono text-[9px]">║</span>
+                                            </div>
+                                          </td>
+                                        )}
 
-                                        {/* SIRF ROLL NUMBER (LARGE FONT) */}
-                                        <div className="mt-0.5 flex items-baseline justify-center gap-1">
-                                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                            ROLL
-                                          </span>
-                                          <span className={`font-black text-black font-mono tracking-tight leading-none ${rollFontSize}`}>
-                                            {seat.rollNo}
-                                          </span>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                                        <span className="text-[9px] font-mono">{seat.seatNo}</span>
-                                        <span className="text-xs font-bold mt-1">— VACANT —</span>
-                                      </div>
-                                    )
-                                  ) : (
-                                    <span className="text-slate-300 text-xs">—</span>
-                                  )}
-                                </td>
-                              </React.Fragment>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                                        <td className={`border-2 border-black align-middle bg-white ${isHalfPage ? 'p-0.5 min-w-[55px]' : 'p-2 min-w-[105px]'} ${cellHeightClass}`}>
+                                          {seat ? (
+                                            occupied ? (
+                                              <div className="flex flex-col items-center justify-center h-full">
+                                                {/* Seat No & Badges */}
+                                                <div className={`w-full flex items-center justify-between font-mono font-bold text-slate-400 mb-0.5 ${isHalfPage ? 'text-[6px]' : 'text-[9px]'}`}>
+                                                  <span>{seat.seatNo}</span>
+                                                  <div className="flex items-center gap-0.5">
+                                                    {isDoor && (
+                                                      <span className={`text-red-700 bg-red-100 font-black rounded ${isHalfPage ? 'text-[5px] px-0.5' : 'text-[8px] px-1'}`}>
+                                                        DOOR
+                                                      </span>
+                                                    )}
+                                                    {isWindow && (
+                                                      <span className={`text-sky-700 bg-sky-100 font-black rounded ${isHalfPage ? 'text-[5px] px-0.5' : 'text-[8px] px-1'}`}>
+                                                        WIN
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                </div>
 
-              {/* Instructions and Signatures */}
-              <div className="mt-4 pt-3 border-t border-slate-300 flex flex-wrap items-center justify-between text-[11px] text-slate-600 gap-2">
-                <div>
-                  <strong>Notice to Students:</strong> Candidates must take their seats strictly according to their Class and Roll Number as indicated on this chart.
-                </div>
-                <div className="flex items-center gap-4 text-xs font-bold">
-                  <span>[DOOR] = Door Side</span>
-                  <span>[WIN] = Window Side</span>
-                </div>
-              </div>
+                                                {/* Class Name */}
+                                                <div className={`font-black text-blue-900 uppercase tracking-wide leading-tight ${classFontSize}`}>
+                                                  {seat.className}
+                                                </div>
 
-              <div className="mt-12 flex justify-between text-center text-xs text-slate-800">
-                <div className="w-56 border-t-2 border-black pt-1 font-bold">
-                  Hall Superintendent / Invigilator
-                </div>
-                <div className="w-56 border-t-2 border-black pt-1 font-bold">
-                  Exam Controller / Center Superintendent
-                </div>
-              </div>
+                                                {/* Roll Number */}
+                                                <div className="mt-0.5 flex items-baseline justify-center gap-0.5">
+                                                  <span className={`font-bold text-slate-500 uppercase tracking-wider ${isHalfPage ? 'text-[7px]' : 'text-[10px]'}`}>
+                                                    ROLL
+                                                  </span>
+                                                  <span className={`font-black text-black font-mono tracking-tight leading-none ${rollFontSize}`}>
+                                                    {seat.rollNo}
+                                                  </span>
+                                                </div>
+                                              </div>
+                                            ) : (
+                                              <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                                                <span className={`font-mono ${isHalfPage ? 'text-[6px]' : 'text-[9px]'}`}>{seat.seatNo}</span>
+                                                <span className={`font-bold ${isHalfPage ? 'text-[7px] mt-0.5' : 'text-xs mt-1'}`}>— VACANT —</span>
+                                              </div>
+                                            )
+                                          ) : (
+                                            <span className="text-slate-300 text-xs">—</span>
+                                          )}
+                                        </td>
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Footer & Signatures */}
+                      <div className={`pt-0.5 border-t border-slate-300 flex items-center justify-between text-slate-700 font-bold ${isHalfPage ? 'text-[7px] mt-0.5' : 'text-[11px] mt-3'}`}>
+                        <div className="text-left">
+                          <span>Room Notice Copy • Sit strictly as per Class & Roll No.</span>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <span className="border-t border-black pt-0.5">Invigilator Sign</span>
+                          <span className="border-t border-black pt-0.5">Center Superintendent Sign</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                };
+
+                // MODE 1: TWO_HALLS (2 Halls on 1 A4 Page - आधा आधा)
+                if (printLayoutMode === 'TWO_HALLS') {
+                  const hall1 = halls.find(h => h.hallId === selectedHallId) || halls[0];
+                  const hall2 =
+                    halls.find(h => h.hallId === (secondHallId || (halls[1]?.hallId || selectedHallId))) ||
+                    halls[1] ||
+                    hall1;
+
+                  return (
+                    <div className="a4-page-sheet flex flex-col justify-between max-w-4xl mx-auto">
+                      {/* Upper Half: Hall 1 */}
+                      <div className="a4-half-block border-2 border-black rounded-xl p-2.5 bg-white shadow-xs">
+                        {renderHallChart(hall1, true)}
+                      </div>
+
+                      {/* Scissor Cut Line (आधा-आधा विभाजन रेखा) */}
+                      <div className="a4-cut-divider my-1 py-0.5 border-y-2 border-dashed border-slate-600 bg-slate-50 flex items-center justify-between px-3 text-[9px] font-mono font-black text-slate-700 uppercase tracking-wider select-none">
+                        <span>✂️ - - - - - - - - - - - -</span>
+                        <span>A4 आधा-आधा विभाजन (CUT HERE FOR ROOM COPY) • अगला परीक्षा कक्ष नीचे है (NEXT HALL BELOW)</span>
+                        <span>- - - - - - - - - - - - ✂️</span>
+                      </div>
+
+                      {/* Lower Half: Hall 2 */}
+                      <div className="a4-half-block border-2 border-black rounded-xl p-2.5 bg-white shadow-xs">
+                        {renderHallChart(hall2, true)}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // MODE 2: ALL_HALLS_PAIRED (Pair all halls 2 per A4 sheet)
+                if (printLayoutMode === 'ALL_HALLS_PAIRED') {
+                  const pairs: [Hall, Hall | undefined][] = [];
+                  for (let i = 0; i < halls.length; i += 2) {
+                    pairs.push([halls[i], halls[i + 1]]);
+                  }
+
+                  return (
+                    <div className="space-y-8 print:space-y-0">
+                      {pairs.map(([h1, h2], pIdx) => (
+                        <div key={pIdx} className="a4-page-sheet flex flex-col justify-between max-w-4xl mx-auto">
+                          {/* Upper Half */}
+                          <div className="a4-half-block border-2 border-black rounded-xl p-2.5 bg-white shadow-xs">
+                            {renderHallChart(h1, true)}
+                          </div>
+
+                          {/* Scissor Cut Line */}
+                          <div className="a4-cut-divider my-1 py-0.5 border-y-2 border-dashed border-slate-600 bg-slate-50 flex items-center justify-between px-3 text-[9px] font-mono font-black text-slate-700 uppercase tracking-wider select-none">
+                            <span>✂️ - - - - - - - - - - - -</span>
+                            <span>A4 आधा-आधा विभाजन (CUT HERE FOR ROOM COPY) • SHEET {pIdx + 1}</span>
+                            <span>- - - - - - - - - - - - ✂️</span>
+                          </div>
+
+                          {/* Lower Half */}
+                          <div className="a4-half-block border-2 border-black rounded-xl p-2.5 bg-white shadow-xs">
+                            {h2 ? (
+                              renderHallChart(h2, true)
+                            ) : (
+                              <div className="h-full flex items-center justify-center text-slate-400 font-bold border border-dashed border-slate-300 rounded-lg">
+                                — Blank Half Page (Odd number of halls) —
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+
+                // MODE 3: SINGLE_HALL (Full Page)
+                return (
+                  <div className="a4-single-full-page max-w-5xl mx-auto">
+                    {renderHallChart(currentHall, false)}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -1810,98 +2204,191 @@ export const SittingArrangementView: React.FC = () => {
       )}
 
       {/* Individual Seat Edit Modal */}
-      {editingSeat && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
-              <div className="flex items-center gap-2 font-bold text-slate-900">
-                <Edit2 className="w-4 h-4 text-blue-600" />
-                <span>Edit Desk {editingSeat.seatNo} Details</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingSeat(null)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
+      {editingSeat && (() => {
+        const cleanClass = (editingSeat.className || '').trim().toUpperCase();
+        const cleanRoll = (editingSeat.rollNo || '').trim();
+        const studentsOfClass = cleanClass
+          ? students.filter(s => s.className.trim().toUpperCase() === cleanClass)
+          : [];
+        const matchedStudent = cleanClass && cleanRoll
+          ? students.find(
+              s => s.className.trim().toUpperCase() === cleanClass &&
+                   (s.rollNo.trim() === cleanRoll || Number(s.rollNo) === Number(cleanRoll))
+            )
+          : null;
 
-            <form onSubmit={handleSaveSeatDetails}>
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Class (कक्षा):
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editingSeat.className}
-                    onChange={e =>
-                      setEditingSeat(prev =>
-                        prev ? { ...prev, className: e.target.value } : null
-                      )
-                    }
-                    placeholder="e.g. X-A"
-                    className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase"
-                  />
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-slate-900">
+                  <Edit2 className="w-4 h-4 text-blue-600" />
+                  <span>Edit Desk {editingSeat.seatNo} Details</span>
                 </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Roll Number (रोल नंबर):
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={editingSeat.rollNo}
-                    onChange={e =>
-                      setEditingSeat(prev =>
-                        prev ? { ...prev, rollNo: e.target.value } : null
-                      )
-                    }
-                    placeholder="e.g. 01"
-                    className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Student Name (छात्र का नाम - Optional):
-                  </label>
-                  <input
-                    type="text"
-                    value={editingSeat.studentName}
-                    onChange={e =>
-                      setEditingSeat(prev =>
-                        prev ? { ...prev, studentName: e.target.value } : null
-                      )
-                    }
-                    placeholder="e.g. Rahul Sharma"
-                    className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2.5">
                 <button
                   type="button"
                   onClick={() => setEditingSeat(null)}
-                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-100 cursor-pointer"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 cursor-pointer"
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs cursor-pointer"
-                >
-                  Save Desk Details
+                  ✕
                 </button>
               </div>
-            </form>
+
+              <form onSubmit={handleSaveSeatDetails}>
+                <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+                  {/* Class Selection */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                      Class (कक्षा):
+                    </label>
+                    {settings.classes.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {settings.classes.map(c => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => handleSeatClassChange(c)}
+                            className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-colors cursor-pointer ${
+                              cleanClass === c.toUpperCase()
+                                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {c}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <input
+                      type="text"
+                      required
+                      value={editingSeat.className}
+                      onChange={e => handleSeatClassChange(e.target.value)}
+                      placeholder="e.g. X-A"
+                      className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase"
+                    />
+                  </div>
+
+                  {/* Registered Students Quick Picker */}
+                  {studentsOfClass.length > 0 && (
+                    <div className="p-2.5 bg-blue-50/70 border border-blue-200 rounded-xl">
+                      <label className="block text-[11px] font-bold text-blue-900 mb-1">
+                        ⚡ Quick Select Registered Student of Class {cleanClass}:
+                      </label>
+                      <select
+                        onChange={e => {
+                          const selected = students.find(s => s.studentId === e.target.value);
+                          if (selected) handleSelectStudentForSeat(selected);
+                        }}
+                        value={matchedStudent ? matchedStudent.studentId : ''}
+                        className="w-full px-2.5 py-1.5 text-xs font-semibold text-slate-800 bg-white border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">-- Choose student (auto-fills Roll & Name) --</option>
+                        {studentsOfClass.map(st => (
+                          <option key={st.studentId} value={st.studentId}>
+                            Roll {st.rollNo} • {st.name} ({st.studentId})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Roll Number Input with Real-Time Auto-Detection */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                        Roll Number (रोल नंबर):
+                      </label>
+                      <span className="text-[10px] text-slate-500">
+                        Type or change roll to auto-generate name
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      value={editingSeat.rollNo}
+                      onChange={e => handleSeatRollChange(e.target.value)}
+                      placeholder="e.g. 01"
+                      className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                    />
+                  </div>
+
+                  {/* Student Name Auto-Generation Status Banner */}
+                  {matchedStudent ? (
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2.5 text-emerald-950 animate-in fade-in duration-150">
+                      <span className="text-base leading-none mt-0.5">✓</span>
+                      <div className="flex-1">
+                        <div className="text-xs font-bold">
+                          Database Match: {matchedStudent.name}
+                        </div>
+                        <div className="text-[10px] text-emerald-700 mt-0.5">
+                          ID: <span className="font-mono font-bold">{matchedStudent.studentId}</span> • Class: {matchedStudent.className} • Roll: {matchedStudent.rollNo}
+                        </div>
+                      </div>
+                    </div>
+                  ) : cleanClass && cleanRoll ? (
+                    <div className="p-3 rounded-xl bg-sky-50 border border-sky-200 flex items-start gap-2.5 text-sky-950 animate-in fade-in duration-150">
+                      <span className="text-base leading-none mt-0.5">✨</span>
+                      <div className="flex-1">
+                        <div className="text-xs font-bold">
+                          Auto-Generated Name: {editingSeat.studentName || `Student ${cleanClass}-${cleanRoll}`}
+                        </div>
+                        <div className="text-[10px] text-sky-700 mt-0.5">
+                          Class & Roll number selected. You can also customize the name below.
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* Student Name Input */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                      Student Name (छात्र का नाम):
+                    </label>
+                    <input
+                      type="text"
+                      value={editingSeat.studentName}
+                      onChange={e =>
+                        setEditingSeat(prev =>
+                          prev ? { ...prev, studentName: e.target.value } : null
+                        )
+                      }
+                      placeholder="e.g. Rahul Sharma"
+                      className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleClearSeat}
+                    className="px-3.5 py-2 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold cursor-pointer transition-colors"
+                  >
+                    Clear Desk (खाली करें)
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditingSeat(null)}
+                      className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-100 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs cursor-pointer"
+                    >
+                      Save Desk Details
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
       {/* Door & Window Configuration Modal */}
       {showDoorWindowModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">

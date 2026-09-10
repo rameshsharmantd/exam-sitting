@@ -1074,22 +1074,34 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             recordKey: st.recordKey
           };
         } else if (seat.rollNo && seat.rollNo.trim() !== '') {
-          // Keep existing roll, update class and studentId
+          // Keep existing roll, update class, studentId, and auto-lookup studentName from database
+          const cleanRoll = seat.rollNo.trim();
+          const matchSt = students.find(
+            s => s.className.trim().toUpperCase() === cleanClass &&
+                 (s.rollNo.trim() === cleanRoll || Number(s.rollNo) === Number(cleanRoll))
+          );
           return {
             ...seat,
             className: cleanClass,
-            studentId: makeStudentId(cleanClass, Number(seat.rollNo) || seat.row)
+            rollNo: cleanRoll,
+            studentId: matchSt ? matchSt.studentId : makeStudentId(cleanClass, Number(cleanRoll) || seat.row),
+            studentName: matchSt ? matchSt.name : `Student ${cleanClass}-${cleanRoll}`,
+            recordKey: matchSt ? matchSt.recordKey : `manual-${cleanClass}-${cleanRoll}-${Date.now()}`
           };
         } else {
-          // Assign sequential roll for this class
+          // Assign sequential roll for this class and auto-lookup studentName
           const rollNum = String(seat.row).padStart(2, '0');
+          const matchSt = students.find(
+            s => s.className.trim().toUpperCase() === cleanClass &&
+                 (s.rollNo.trim() === rollNum || Number(s.rollNo) === Number(rollNum))
+          );
           return {
             ...seat,
             className: cleanClass,
             rollNo: rollNum,
-            studentId: makeStudentId(cleanClass, Number(seat.row)),
-            studentName: `Student ${cleanClass}-${rollNum}`,
-            recordKey: `manual-${cleanClass}-${rollNum}-${Date.now()}`
+            studentId: matchSt ? matchSt.studentId : makeStudentId(cleanClass, Number(seat.row)),
+            studentName: matchSt ? matchSt.name : `Student ${cleanClass}-${rollNum}`,
+            recordKey: matchSt ? matchSt.recordKey : `manual-${cleanClass}-${rollNum}-${Date.now()}`
           };
         }
       }
@@ -1142,10 +1154,42 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const idx = plan.seats.findIndex(s => s.seatNo === seatNo);
     if (idx === -1) return { success: false, message: 'Seat not found.' };
 
+    const currentSeat = plan.seats[idx];
+    const finalClass = (details.className !== undefined ? details.className : currentSeat.className).trim().toUpperCase();
+    const finalRoll = (details.rollNo !== undefined ? details.rollNo : currentSeat.rollNo).trim();
+
+    let finalName = details.studentName !== undefined ? details.studentName.trim() : currentSeat.studentName;
+    let finalStudentId = details.studentId !== undefined ? details.studentId.trim() : currentSeat.studentId;
+
+    // Auto-generate student name and student ID if class and roll are selected/provided
+    if (finalClass && finalRoll) {
+      const match = students.find(
+        s => s.className.trim().toUpperCase() === finalClass &&
+             (s.rollNo.trim() === finalRoll || Number(s.rollNo) === Number(finalRoll))
+      );
+      if (match) {
+        if (!finalName || finalName === '' || finalName.startsWith('Student ') || details.studentName === undefined) {
+          finalName = match.name;
+        }
+        if (!finalStudentId || finalStudentId === '' || details.studentId === undefined) {
+          finalStudentId = match.studentId;
+        }
+      } else if (!finalName || finalName === '') {
+        finalName = `Student ${finalClass}-${finalRoll}`;
+        if (!finalStudentId || finalStudentId === '') {
+          finalStudentId = `STU-${finalClass}-${finalRoll}`;
+        }
+      }
+    }
+
     const newSeats = [...plan.seats];
     newSeats[idx] = {
       ...newSeats[idx],
-      ...details
+      ...details,
+      className: finalClass,
+      rollNo: finalRoll,
+      studentName: finalName,
+      studentId: finalStudentId
     };
 
     setSittingPlans(prev => ({
