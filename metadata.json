@@ -1,0 +1,6 @@
+{
+  "name": "School Student & Exam Management System",
+  "description": "Student records, hall management, seating arrangement planner, and exam attendance system for Manthan Valley St. Albert’s Senior Secondary School.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
