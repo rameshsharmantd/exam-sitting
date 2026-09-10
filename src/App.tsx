@@ -19,6 +19,7 @@ import { PromotionView } from './components/promotion/PromotionView';
 import { HallManagementView } from './components/halls/HallManagementView';
 import { HallClassMapView } from './components/halls/HallClassMapView';
 import { SittingArrangementView } from './components/sitting/SittingArrangementView';
+import { ExamTimeTableView } from './components/timetable/ExamTimeTableView';
 import { ExamAttendanceView } from './components/attendance/ExamAttendanceView';
 import { ReportsView } from './components/reports/ReportsView';
 import { ActivityLogView } from './components/activity/ActivityLogView';
@@ -37,6 +38,8 @@ const MainApp: React.FC = () => {
     switch (activeSection) {
       case 'dashboard':
         return <DashboardView onNavigate={(section) => setActiveSection(section)} />;
+      case 'timetable':
+        return <ExamTimeTableView onNavigate={(section) => setActiveSection(section)} />;
       case 'students':
         return <StudentsView onNavigate={(section) => setActiveSection(section)} />;
       case 'addStudent':

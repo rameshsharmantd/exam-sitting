@@ -8,6 +8,7 @@ import {
   Building2,
   Columns3,
   Grid3X3,
+  Calendar,
   FileCheck,
   Printer,
   History,
@@ -37,6 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const navItems: { id: ActiveSection; label: string; icon: React.ReactNode; badge?: string | number }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
+    { id: 'timetable', label: 'Exam Time Table', icon: <Calendar className="w-4 h-4" /> },
     { id: 'students', label: 'Students Directory', icon: <Users className="w-4 h-4" />, badge: studentCount },
     { id: 'addStudent', label: 'Add Student', icon: <UserPlus className="w-4 h-4" /> },
     { id: 'search', label: 'Global Search', icon: <Search className="w-4 h-4" /> },

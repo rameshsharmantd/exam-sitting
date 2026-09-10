@@ -6,6 +6,7 @@ import {
   SittingArrangement,
   SittingSeat,
   ExamAttendanceRecord,
+  ExamTimeTableEntry,
   ActivityLog,
   SystemSettings,
   ClassSeatingStatus
@@ -18,6 +19,11 @@ import {
   INITIAL_ACTIVITY_LOGS,
   DEFAULT_SETTINGS
 } from '../data/initialData';
+import {
+  INITIAL_TIMETABLE_ENTRIES,
+  normalizeClassForTimeTable,
+  DEFAULT_EXAM_NOTES
+} from '../utils/timetableUtils';
 
 interface SchoolContextType {
   // Auth
@@ -126,9 +132,20 @@ interface SchoolContextType {
     exam: string,
     session: string,
     hallId: string,
-    subject: string
+    subject: string,
+    date?: string
   ) => { success: boolean; generated: number; message?: string };
   clearAttendanceForSubject: (exam: string, session: string, subject: string) => void;
+  clearAttendanceRecords: (exam?: string, session?: string, options?: { subject?: string; date?: string; hallId?: string }) => void;
+
+  // Exam Time Table
+  timeTableEntries: ExamTimeTableEntry[];
+  saveTimeTableEntry: (entry: ExamTimeTableEntry) => { success: boolean };
+  deleteTimeTableEntry: (id: string) => { success: boolean };
+  getTimeTableForExam: (exam: string, session: string) => ExamTimeTableEntry[];
+  getSubjectForClassAndDate: (exam: string, session: string, date: string, className: string) => string;
+  examNotes: string[];
+  updateExamNotes: (notes: string[]) => void;
 
   // Activity Log
   activityLogs: ActivityLog[];
@@ -163,7 +180,9 @@ const STORAGE_KEYS = {
   HALL_MAPS: 'sm_hall_maps',
   SITTING_PLANS: 'sm_sitting_plans',
   ATTENDANCE: 'sm_attendance',
-  ACTIVITY_LOGS: 'sm_activity_logs'
+  ACTIVITY_LOGS: 'sm_activity_logs',
+  TIMETABLE: 'sm_timetable_entries',
+  EXAM_NOTES: 'sm_exam_notes'
 };
 
 export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -269,6 +288,32 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return INITIAL_ACTIVITY_LOGS;
   });
 
+  // 9. Exam Time Table
+  const [timeTableEntries, setTimeTableEntries] = useState<ExamTimeTableEntry[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.TIMETABLE);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error("Failed to parse timetable entries", e);
+      }
+    }
+    return INITIAL_TIMETABLE_ENTRIES;
+  });
+
+  // 10. Exam Notes
+  const [examNotes, setExamNotes] = useState<string[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.EXAM_NOTES);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error("Failed to parse exam notes", e);
+      }
+    }
+    return DEFAULT_EXAM_NOTES;
+  });
+
   // Persistence hooks
   useEffect(() => {
     if (adminUser) {
@@ -305,6 +350,14 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.ACTIVITY_LOGS, JSON.stringify(activityLogs));
   }, [activityLogs]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.TIMETABLE, JSON.stringify(timeTableEntries));
+  }, [timeTableEntries]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.EXAM_NOTES, JSON.stringify(examNotes));
+  }, [examNotes]);
 
   // Activity logger
   const logActivity = (action: string, studentId?: string, className?: string, details?: string) => {
@@ -1245,9 +1298,15 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   // Exam Attendance
-  const generateAttendance = (exam: string, session: string, hallId: string, subject: string) => {
-    if (!exam || !session || !subject.trim()) {
-      return { success: false, generated: 0, message: 'Exam, Session and Subject are required.' };
+  const generateAttendance = (
+    exam: string,
+    session: string,
+    hallId: string,
+    subject: string,
+    date?: string
+  ) => {
+    if (!exam || !session) {
+      return { success: false, generated: 0, message: 'Exam and Session are required.' };
     }
 
     // Collect relevant sitting plans
@@ -1269,25 +1328,50 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       };
     }
 
-    let serial = attendanceRecords.length + 1;
+    const matchingEntry = date
+      ? timeTableEntries.find(e => e.exam === exam && e.session === session && e.date === date)
+      : undefined;
+    const dayVal = matchingEntry?.day;
+
+    let serial = 1;
     const newRecords: ExamAttendanceRecord[] = [];
 
     targetPlans.forEach(plan => {
+      const targetHall = halls.find(h => h.hallId === plan.hallId);
+      const hallHeadingName = targetHall
+        ? `${targetHall.hallName} (${targetHall.hallId})`
+        : plan.hallName || plan.hallId;
+
       const occupiedSeats = plan.seats
         .filter(s => s.studentName.trim() !== '')
         .sort((a, b) => a.row - b.row || a.column - b.column);
 
       occupiedSeats.forEach(seat => {
+        // Class-wise automatic subject lookup if date is selected
+        let studentSubject = subject.trim();
+        if (date) {
+          const autoSub = getSubjectForClassAndDate(exam, session, date, seat.className);
+          if (autoSub) {
+            studentSubject = autoSub;
+          }
+        }
+        if (!studentSubject) {
+          studentSubject = 'General';
+        }
+
         newRecords.push({
           sNo: serial++,
           exam,
           session,
-          hall: plan.hallName || plan.hallId,
+          hall: hallHeadingName,
+          hallId: plan.hallId,
           seatNo: seat.seatNo,
           className: seat.className,
           rollNo: seat.rollNo,
           studentName: seat.studentName,
-          subject: subject.trim(),
+          subject: studentSubject,
+          date: date || undefined,
+          day: dayVal,
           signature: '',
           createdAt: new Date().toISOString()
         });
@@ -1298,12 +1382,22 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return { success: false, generated: 0, message: 'No seated students found in the sitting plan.' };
     }
 
-    setAttendanceRecords(prev => [...prev, ...newRecords]);
+    setAttendanceRecords(prev => {
+      const targetHallIds = new Set(targetPlans.map(p => p.hallId));
+      const filtered = prev.filter(r => {
+        if (r.exam !== exam || r.session !== session) return true;
+        if (r.hallId && !targetHallIds.has(r.hallId)) return true;
+        if (date && r.date !== date) return true;
+        if (!date && r.subject !== subject) return true;
+        return false;
+      });
+      return [...filtered, ...newRecords];
+    });
     logActivity(
       'ATTENDANCE_GENERATED',
       '',
       '',
-      `${exam} / ${session} / ${hallId || 'ALL'} / ${subject} (${newRecords.length} records generated)`
+      `${exam} / ${session} / ${hallId || 'ALL'} / ${date ? `Date: ${date}` : `Subject: ${subject}`} (${newRecords.length} records generated)`
     );
 
     return {
@@ -1316,6 +1410,75 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setAttendanceRecords(prev =>
       prev.filter(r => !(r.exam === exam && r.session === session && r.subject === subject))
     );
+  };
+
+  const clearAttendanceRecords = (
+    exam?: string,
+    session?: string,
+    options?: { subject?: string; date?: string; hallId?: string }
+  ) => {
+    setAttendanceRecords(prev => {
+      return prev.filter(r => {
+        if (exam && r.exam !== exam) return true;
+        if (session && r.session !== session) return true;
+        if (options?.subject && options.subject !== 'ALL' && r.subject !== options.subject) return true;
+        if (options?.date && options.date !== 'ALL' && r.date !== options.date) return true;
+        if (options?.hallId && options.hallId !== 'ALL' && r.hallId !== options.hallId) return true;
+        return false;
+      });
+    });
+  };
+
+  // Exam Time Table
+  const saveTimeTableEntry = (entry: ExamTimeTableEntry) => {
+    setTimeTableEntries(prev => {
+      const idx = prev.findIndex(e => e.id === entry.id);
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = entry;
+        return next;
+      }
+      return [...prev, entry].sort((a, b) => a.date.localeCompare(b.date));
+    });
+    logActivity('TIMETABLE_UPDATED', '', '', `${entry.exam} / ${entry.session} / ${entry.date}`);
+    return { success: true };
+  };
+
+  const deleteTimeTableEntry = (id: string) => {
+    setTimeTableEntries(prev => prev.filter(e => e.id !== id));
+    logActivity('TIMETABLE_DELETED', '', '', `Entry ID: ${id}`);
+    return { success: true };
+  };
+
+  const getTimeTableForExam = (exam: string, session: string): ExamTimeTableEntry[] => {
+    return timeTableEntries
+      .filter(e => e.exam === exam && e.session === session)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  };
+
+  const getSubjectForClassAndDate = (
+    exam: string,
+    session: string,
+    date: string,
+    className: string
+  ): string => {
+    const entry = timeTableEntries.find(
+      e => e.exam === exam && e.session === session && e.date === date
+    );
+    if (!entry) return '';
+
+    const stdClass = normalizeClassForTimeTable(className);
+    if (entry.classSubjects[stdClass]) {
+      return entry.classSubjects[stdClass];
+    }
+    if (entry.classSubjects[className]) {
+      return entry.classSubjects[className];
+    }
+    return '';
+  };
+
+  const updateExamNotes = (notes: string[]) => {
+    setExamNotes(notes);
   };
 
   // Reset to default
@@ -1341,7 +1504,9 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       hallClassMaps,
       sittingPlans,
       attendanceRecords,
-      activityLogs
+      activityLogs,
+      timeTableEntries,
+      examNotes
     };
     return JSON.stringify(bundle, null, 2);
   };
@@ -1354,6 +1519,8 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (data.hallClassMaps && Array.isArray(data.hallClassMaps)) setHallClassMaps(data.hallClassMaps);
       if (data.sittingPlans) setSittingPlans(data.sittingPlans);
       if (data.attendanceRecords && Array.isArray(data.attendanceRecords)) setAttendanceRecords(data.attendanceRecords);
+      if (data.timeTableEntries && Array.isArray(data.timeTableEntries)) setTimeTableEntries(data.timeTableEntries);
+      if (data.examNotes && Array.isArray(data.examNotes)) setExamNotes(data.examNotes);
       if (data.settings) setSettings(data.settings);
       logActivity('DATA_IMPORTED', '', '', 'Imported external backup JSON dataset.');
       return { success: true };
@@ -1406,6 +1573,14 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         attendanceRecords,
         generateAttendance,
         clearAttendanceForSubject,
+        clearAttendanceRecords,
+        timeTableEntries,
+        saveTimeTableEntry,
+        deleteTimeTableEntry,
+        getTimeTableForExam,
+        getSubjectForClassAndDate,
+        examNotes,
+        updateExamNotes,
         activityLogs,
         logActivity,
         resetToDefaults,

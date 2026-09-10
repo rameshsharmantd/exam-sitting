@@ -45,6 +45,10 @@ const SECTION_TITLES: Record<ActiveSection, { title: string; subtitle: string }>
     title: 'Exam Sitting Arrangement',
     subtitle: 'Round-robin & class-wise desk allocation with drag-and-drop seat swapping'
   },
+  timetable: {
+    title: 'Examination Time Table (समय-सारिणी)',
+    subtitle: 'Date-wise exam schedule for Pre-Primary (NUR-UKG), Primary (I-V), and Middle/Secondary (VI-X)'
+  },
   attendance: {
     title: 'Exam Attendance Register',
     subtitle: 'Generate printable exam attendance sheets with seat numbers and signature fields'
