@@ -23,10 +23,12 @@ import {
   Plus,
   Settings2,
   Sliders,
-  Type
+  Type,
+  Edit2
 } from 'lucide-react';
 import { useSchool } from '../../context/SchoolContext';
 import { HeaderPrint } from '../common/HeaderPrint';
+import { SittingSeat } from '../../types';
 
 export const SittingArrangementView: React.FC = () => {
   const {
@@ -38,6 +40,8 @@ export const SittingArrangementView: React.FC = () => {
     clearSittingPlan,
     swapSeats,
     emptySeat,
+    updateColumnClass,
+    updateSeatDetails,
     lockSitting,
     unlockSitting,
     getHallClasses,
@@ -60,6 +64,30 @@ export const SittingArrangementView: React.FC = () => {
   const [selectedSeatForSwap, setSelectedSeatForSwap] = useState<string | null>(null);
   const [draggedSeatNo, setDraggedSeatNo] = useState<string | null>(null);
 
+  // Editable Column & Relative desks state
+  const [editingColumn, setEditingColumn] = useState<{
+    colNum: number;
+    currentClass: string;
+    customClassName: string;
+    targetScope: 'SINGLE' | 'ALTERNATING' | 'ALL';
+    mode: 'FILL_STUDENTS' | 'KEEP_ROLLS';
+  } | null>(null);
+
+  // Editable Seat details state
+  const [editingSeat, setEditingSeat] = useState<{
+    seatNo: string;
+    className: string;
+    rollNo: string;
+    studentName: string;
+  } | null>(null);
+
+  // Door and Window configuration (editable at head)
+  const [doorSide, setDoorSide] = useState<'LEFT' | 'RIGHT'>('LEFT');
+  const [windowSide, setWindowSide] = useState<'LEFT' | 'RIGHT'>('RIGHT');
+  const [doorLabel, setDoorLabel] = useState<string>('MAIN DOOR (प्रवेश द्वार)');
+  const [windowLabel, setWindowLabel] = useState<string>('WINDOW (खिड़की)');
+  const [showDoorWindowModal, setShowDoorWindowModal] = useState<boolean>(false);
+
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [showOverflowList, setShowOverflowList] = useState(false);
@@ -77,16 +105,30 @@ export const SittingArrangementView: React.FC = () => {
   const nextHall = currentHallIndex >= 0 && currentHallIndex + 1 < halls.length ? halls[currentHallIndex + 1] : null;
   const prevHall = currentHallIndex > 0 ? halls[currentHallIndex - 1] : null;
 
-  // Synchronize dynamic rows & columns when hall changes
+  // Synchronize dynamic rows & columns and door/window when hall changes
   useEffect(() => {
     if (currentHall) {
       setCustomRows(currentHall.rows);
       setCustomCols(currentHall.columns);
+
+      const dPos = (currentHall.doorPosition || '').toUpperCase();
+      if (dPos.includes(`C${currentHall.columns}`) || dPos.includes('RIGHT')) {
+        setDoorSide('RIGHT');
+        setWindowSide('LEFT');
+      } else {
+        setDoorSide('LEFT');
+        setWindowSide('RIGHT');
+      }
     }
-  }, [currentHall?.hallId, currentHall?.rows, currentHall?.columns]);
+  }, [currentHall?.hallId, currentHall?.rows, currentHall?.columns, currentHall?.doorPosition, currentHall?.windowPosition]);
 
   // Assigned classes in current hall
   const currentAssignedClasses = selectedHallId ? getHallClasses(exam, session, selectedHallId) : [];
+
+  // Split calculation (e.g. 6 cols -> 3+3; 8 cols -> 4+4)
+  const totalCols = currentHall?.columns || 0;
+  const shouldSplit = totalCols >= 4;
+  const splitCol = Math.ceil(totalCols / 2);
 
   // Remaining students in assigned classes for this hall
   const remainingStudentsInAssigned = currentAssignedClasses.flatMap(a =>
@@ -154,6 +196,142 @@ export const SittingArrangementView: React.FC = () => {
       setSelectedSeatForSwap(null);
       setMessage({ type: 'info', text: `Seating plan for ${currentHall?.hallName} has been cleared.` });
     }
+  };
+
+  const handleColumnClassChange = (
+    colNum: number,
+    newClassName: string,
+    scope: 'SINGLE' | 'ALTERNATING' | 'ALL' = 'SINGLE',
+    mode: 'FILL_STUDENTS' | 'KEEP_ROLLS' = 'FILL_STUDENTS'
+  ) => {
+    if (!currentPlan || !currentHall) return;
+    if (currentPlan.locked) {
+      setMessage({
+        type: 'error',
+        text: 'Sitting arrangement is locked. Please unlock it to edit column classes.'
+      });
+      return;
+    }
+
+    const cleanClass = newClassName.trim().toUpperCase();
+    if (!cleanClass) return;
+
+    let targetCols: number[] = [];
+    if (scope === 'SINGLE') {
+      targetCols = [colNum];
+    } else if (scope === 'ALTERNATING') {
+      const isEven = colNum % 2 === 0;
+      for (let c = 1; c <= currentHall.columns; c++) {
+        if ((c % 2 === 0) === isEven) {
+          targetCols.push(c);
+        }
+      }
+    } else if (scope === 'ALL') {
+      for (let c = 1; c <= currentHall.columns; c++) {
+        targetCols.push(c);
+      }
+    }
+
+    let updatedCount = 0;
+    targetCols.forEach(c => {
+      const res = updateColumnClass(exam, session, selectedHallId, c, cleanClass, mode);
+      if (res.success) updatedCount++;
+    });
+
+    setMessage({
+      type: 'success',
+      text: `Class "${cleanClass}" successfully set for ${
+        scope === 'SINGLE'
+          ? `Column ${colNum}`
+          : scope === 'ALTERNATING'
+          ? `Alternating Columns (${targetCols.map(c => `Col ${c}`).join(', ')})`
+          : `All ${updatedCount} Columns`
+      } and relative examination desks!`
+    });
+
+    setEditingColumn(null);
+  };
+
+  const handleSaveSeatDetails = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSeat || !selectedHallId) return;
+
+    const res = updateSeatDetails(exam, session, selectedHallId, editingSeat.seatNo, {
+      className: editingSeat.className.trim().toUpperCase(),
+      rollNo: editingSeat.rollNo.trim(),
+      studentName: editingSeat.studentName.trim()
+    });
+
+    if (res.success) {
+      setMessage({
+        type: 'success',
+        text: `Desk ${editingSeat.seatNo} details successfully updated (Class: ${editingSeat.className.trim().toUpperCase()}, Roll: ${editingSeat.rollNo.trim()}).`
+      });
+    }
+    setEditingSeat(null);
+  };
+
+  const handleSwapDoorWindow = () => {
+    const newDoorSide = doorSide === 'LEFT' ? 'RIGHT' : 'LEFT';
+    const newWindowSide = windowSide === 'RIGHT' ? 'LEFT' : 'RIGHT';
+    setDoorSide(newDoorSide);
+    setWindowSide(newWindowSide);
+
+    if (currentHall) {
+      const dPos = newDoorSide === 'LEFT' ? 'R1C1' : `R1C${currentHall.columns}`;
+      const wPos = newWindowSide === 'RIGHT' ? `R1C${currentHall.columns}` : 'R1C1';
+      saveHall({
+        ...currentHall,
+        doorPosition: dPos,
+        windowPosition: wPos
+      });
+    }
+
+    setMessage({
+      type: 'success',
+      text: `Door swapped to ${newDoorSide} side and Window swapped to ${newWindowSide} side.`
+    });
+  };
+
+  const handleSaveDoorWindowConfig = (
+    newDoor: 'LEFT' | 'RIGHT',
+    newWin: 'LEFT' | 'RIGHT',
+    dLbl: string,
+    wLbl: string
+  ) => {
+    setDoorSide(newDoor);
+    setWindowSide(newWin);
+    setDoorLabel(dLbl.trim() || 'MAIN DOOR (प्रवेश द्वार)');
+    setWindowLabel(wLbl.trim() || 'WINDOW (खिड़की)');
+
+    if (currentHall) {
+      const dPos = newDoor === 'LEFT' ? 'R1C1' : `R1C${currentHall.columns}`;
+      const wPos = newWin === 'RIGHT' ? `R1C${currentHall.columns}` : 'R1C1';
+      saveHall({
+        ...currentHall,
+        doorPosition: dPos,
+        windowPosition: wPos
+      });
+    }
+    setShowDoorWindowModal(false);
+    setMessage({
+      type: 'success',
+      text: `Door & Window configuration saved successfully!`
+    });
+  };
+
+  const getSeatDoorWindowStatus = (seat: SittingSeat, totalCols: number) => {
+    const isDoor =
+      (doorSide === 'LEFT' && seat.column === 1) ||
+      (doorSide === 'RIGHT' && seat.column === totalCols) ||
+      seat.doorWindow.includes('DOOR');
+
+    const isWindow =
+      (windowSide === 'RIGHT' && seat.column === totalCols) ||
+      (windowSide === 'LEFT' && seat.column === 1) ||
+      seat.doorWindow.includes('WINDOW');
+
+    return { isDoor, isWindow };
   };
 
   const handleSeatClick = (seatNo: string, hasStudent: boolean) => {
@@ -796,7 +974,71 @@ export const SittingArrangementView: React.FC = () => {
         ) : (
           <div className="overflow-x-auto pb-4">
             <div className="inline-block min-w-max space-y-3 p-1">
-              {/* Column Headers Row (Column-wise View) */}
+              {/* Room Front / Head Banner with Door & Window (Editable) */}
+              {currentHall && (
+                <div className="p-3 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white rounded-2xl shadow-sm border border-slate-700 flex items-center justify-between gap-3 select-none">
+                  {/* Left Side (Door or Window) */}
+                  <div className="flex items-center gap-2">
+                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-xs ${
+                      doorSide === 'LEFT'
+                        ? 'bg-red-500/20 border-red-400/60 text-red-200'
+                        : 'bg-sky-500/20 border-sky-400/60 text-sky-200'
+                    }`}>
+                      <span className="text-base">{doorSide === 'LEFT' ? '🚪' : '🪟'}</span>
+                      <span className="tracking-wide uppercase font-black">{doorSide === 'LEFT' ? doorLabel : windowLabel}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowDoorWindowModal(true)}
+                      className="text-[10px] text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded-lg border border-slate-600 cursor-pointer transition-colors"
+                      title="Edit Door & Window Settings"
+                    >
+                      <Edit2 className="w-3 h-3 inline mr-1" />
+                      Edit
+                    </button>
+                  </div>
+
+                  {/* Center (Blackboard & 2-Part Wings info) */}
+                  <div className="flex flex-col items-center justify-center text-center px-4">
+                    <div className="text-xs sm:text-sm font-black uppercase tracking-widest text-slate-100 flex items-center gap-2">
+                      <span className="text-amber-400">▲</span>
+                      <span>BLACKBOARD / TEACHER'S DESK / FRONT OF EXAMINATION HALL</span>
+                      <span className="text-amber-400">▲</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-blue-300 font-semibold mt-0.5">
+                      {shouldSplit ? (
+                        <span>
+                          Wing A (Cols 1-{splitCol}) &nbsp;•&nbsp; ║ Central Walkway (गैलरी / रास्ता) ║ &nbsp;•&nbsp; Wing B (Cols {splitCol + 1}-{totalCols})
+                        </span>
+                      ) : (
+                        <span>Examination Hall Seating Matrix</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Side (Window or Door) */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSwapDoorWindow}
+                      className="text-[10px] text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-lg border border-slate-600 cursor-pointer transition-colors"
+                      title="Swap Door and Window sides"
+                    >
+                      ⇄ Swap Sides
+                    </button>
+                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-xs ${
+                      windowSide === 'RIGHT'
+                        ? 'bg-sky-500/20 border-sky-400/60 text-sky-200'
+                        : 'bg-red-500/20 border-red-400/60 text-red-200'
+                    }`}>
+                      <span className="text-base">{windowSide === 'RIGHT' ? '🪟' : '🚪'}</span>
+                      <span className="tracking-wide uppercase font-black">{windowSide === 'RIGHT' ? windowLabel : doorLabel}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Column Headers Row (Column-wise View with 2 Parts & Aisle) */}
               {currentHall && (
                 <div className="flex items-center gap-3 pb-1 border-b border-slate-200">
                   <div className="w-14 text-right shrink-0 text-xs font-bold text-slate-400 font-mono">
@@ -809,27 +1051,84 @@ export const SittingArrangementView: React.FC = () => {
                       const colSeats = currentPlan.seats.filter(s => s.column === colNum);
                       const colClass =
                         colSeats.find(s => s.className?.trim() !== '')?.className ||
-                        currentAssignedClasses[cIdx]?.className;
+                        currentAssignedClasses[cIdx]?.className ||
+                        '';
 
                       return (
-                        <div
-                          key={colNum}
-                          className="w-36 py-1.5 px-2 text-center rounded-xl bg-slate-100 border border-slate-200 shadow-2xs"
-                        >
-                          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                            Column {colNum}
+                        <React.Fragment key={colNum}>
+                          {/* Central Walkway Aisle Divider between Part 1 and Part 2 */}
+                          {shouldSplit && colNum === splitCol + 1 && (
+                            <div className="w-20 py-2 px-1 text-center rounded-xl bg-amber-50/90 border-2 border-dashed border-amber-300 shadow-2xs flex flex-col items-center justify-center text-amber-900 shrink-0 select-none">
+                              <div className="text-[10px] font-black uppercase tracking-wider">AISLE</div>
+                              <div className="text-[8px] font-bold text-amber-700">गैलरी / रास्ता</div>
+                            </div>
+                          )}
+
+                          <div
+                            className="w-36 py-2 px-2 text-center rounded-xl bg-slate-50 hover:bg-slate-100 border-2 border-slate-200 hover:border-blue-400 transition-all shadow-2xs group flex flex-col justify-between"
+                          >
+                            <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                              <span>Col {colNum}</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setEditingColumn({
+                                    colNum,
+                                    currentClass: colClass,
+                                    customClassName: colClass,
+                                    targetScope: 'SINGLE',
+                                    mode: 'FILL_STUDENTS'
+                                  })
+                                }
+                                title={`Edit Class for Column ${colNum} and relative desks`}
+                                className="opacity-70 group-hover:opacity-100 p-0.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded cursor-pointer transition-opacity"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                            </div>
+
+                            {/* Editable Class Selector (sabhi column editable) */}
+                            <select
+                              value={colClass}
+                              disabled={currentPlan.locked}
+                              onChange={e => {
+                                if (e.target.value === '__custom__') {
+                                  setEditingColumn({
+                                    colNum,
+                                    currentClass: colClass,
+                                    customClassName: colClass,
+                                    targetScope: 'SINGLE',
+                                    mode: 'FILL_STUDENTS'
+                                  });
+                                } else {
+                                  handleColumnClassChange(colNum, e.target.value, 'SINGLE', 'FILL_STUDENTS');
+                                }
+                              }}
+                              className="w-full text-xs font-black text-blue-900 bg-white border border-slate-300 rounded px-1.5 py-1 shadow-2xs hover:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 text-center font-mono cursor-pointer transition-all disabled:opacity-50"
+                              title={`Click to edit Class for Column ${colNum} and relative desks`}
+                            >
+                              <option value="" disabled>
+                                -- Select Class --
+                              </option>
+                              {settings.classes.map(cls => (
+                                <option key={cls} value={cls}>
+                                  {cls}
+                                </option>
+                              ))}
+                              {colClass && !settings.classes.includes(colClass) && (
+                                <option value={colClass}>{colClass}</option>
+                              )}
+                              <option value="__custom__">✏️ Custom / All...</option>
+                            </select>
                           </div>
-                          <div className="text-xs font-black text-blue-900 truncate">
-                            {colClass || `Col ${colNum}`}
-                          </div>
-                        </div>
+                        </React.Fragment>
                       );
                     })}
                   </div>
                 </div>
               )}
 
-              {/* Rows (Row-wise View) */}
+              {/* Rows (Row-wise View with 2 Parts & Aisle) */}
               {currentHall &&
                 Array.from({ length: currentHall.rows }, (_, rIdx) => {
                   const rowNum = rIdx + 1;
@@ -845,68 +1144,76 @@ export const SittingArrangementView: React.FC = () => {
                         {rowSeats.map(seat => {
                           const occupied = seat.studentName.trim() !== '';
                           const isSwapSelected = selectedSeatForSwap === seat.seatNo;
-                          const isDoor = seat.doorWindow.includes('DOOR');
-                          const isWindow = seat.doorWindow.includes('WINDOW');
+                          const { isDoor, isWindow } = getSeatDoorWindowStatus(seat, currentHall.columns);
 
                           return (
-                            <div
-                              key={seat.seatNo}
-                              draggable={!currentPlan.locked && occupied}
-                              onDragStart={() => handleDragStart(seat.seatNo)}
-                              onDragOver={handleDragOver}
-                              onDrop={() => handleDrop(seat.seatNo)}
-                              onClick={() => handleSeatClick(seat.seatNo, occupied)}
-                              className={`w-36 h-28 rounded-xl border-2 p-2 relative transition-all cursor-pointer select-none flex flex-col justify-between ${
-                                isSwapSelected
-                                  ? 'border-blue-600 bg-blue-50 ring-2 ring-blue-500 shadow-md scale-102'
-                                  : occupied
-                                  ? 'bg-blue-50/70 border-blue-200 hover:border-blue-400 hover:shadow-sm'
-                                  : 'bg-white border-dashed border-slate-300 hover:border-slate-400'
-                              } ${currentPlan.locked ? 'cursor-default' : ''}`}
-                            >
-                              {/* Top row: Seat No & Door/Window markers */}
-                              <div className="flex items-center justify-between">
-                                <span className="font-mono text-[10px] font-bold text-slate-500">
-                                  {seat.seatNo}
-                                </span>
-
-                                <div className="flex items-center gap-1">
-                                  {isDoor && (
-                                    <span className="px-1 py-0.2 rounded text-[8px] font-extrabold bg-red-100 text-red-700 border border-red-200">
-                                      DOOR
-                                    </span>
-                                  )}
-                                  {isWindow && (
-                                    <span className="px-1 py-0.2 rounded text-[8px] font-extrabold bg-sky-100 text-sky-700 border border-sky-200">
-                                      WIN
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Student Info or Empty */}
-                              {occupied ? (
-                                <div className="min-w-0 my-1">
-                                  <div className="flex items-center justify-between text-[11px]">
-                                    <span className="font-bold text-blue-900 truncate">
-                                      {seat.className}
-                                    </span>
-                                    <span className="font-mono text-slate-600 font-semibold text-[10px]">
-                                      R: {seat.rollNo}
-                                    </span>
-                                  </div>
-                                  <div className="text-xs font-bold text-slate-900 leading-tight truncate mt-0.5">
-                                    {seat.studentName}
-                                  </div>
-                                  <div className="text-[10px] font-mono text-slate-400 truncate">
-                                    {seat.studentId}
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="text-center py-3 text-[11px] font-semibold text-slate-400">
-                                  VACANT DESK
+                            <React.Fragment key={seat.seatNo}>
+                              {/* Central Walkway Spacer between Part 1 and Part 2 */}
+                              {shouldSplit && seat.column === splitCol + 1 && (
+                                <div className="w-20 h-28 rounded-xl bg-slate-100/90 border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 select-none shrink-0">
+                                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">AISLE</span>
+                                  <span className="text-[8px] font-bold text-slate-400">गैलरी</span>
+                                  <span className="text-slate-300 font-mono text-xs">║</span>
                                 </div>
                               )}
+
+                              <div
+                                draggable={!currentPlan.locked && occupied}
+                                onDragStart={() => handleDragStart(seat.seatNo)}
+                                onDragOver={handleDragOver}
+                                onDrop={() => handleDrop(seat.seatNo)}
+                                onClick={() => handleSeatClick(seat.seatNo, occupied)}
+                                className={`w-36 h-28 rounded-xl border-2 p-2 relative transition-all cursor-pointer select-none flex flex-col justify-between ${
+                                  isSwapSelected
+                                    ? 'border-blue-600 bg-blue-50 ring-2 ring-blue-500 shadow-md scale-102'
+                                    : occupied
+                                    ? 'bg-blue-50/70 border-blue-200 hover:border-blue-400 hover:shadow-sm'
+                                    : 'bg-white border-dashed border-slate-300 hover:border-slate-400'
+                                } ${currentPlan.locked ? 'cursor-default' : ''}`}
+                              >
+                                {/* Top row: Seat No & Door/Window markers */}
+                                <div className="flex items-center justify-between">
+                                  <span className="font-mono text-[10px] font-bold text-slate-500">
+                                    {seat.seatNo}
+                                  </span>
+
+                                  <div className="flex items-center gap-1">
+                                    {isDoor && (
+                                      <span className="px-1 py-0.2 rounded text-[8px] font-extrabold bg-red-100 text-red-700 border border-red-200" title="Door Entrance Desk">
+                                        DOOR
+                                      </span>
+                                    )}
+                                    {isWindow && (
+                                      <span className="px-1 py-0.2 rounded text-[8px] font-extrabold bg-sky-100 text-sky-700 border border-sky-200" title="Window Ventilation Desk">
+                                        WIN
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Student Info or Empty */}
+                                {occupied ? (
+                                  <div className="min-w-0 my-1">
+                                    <div className="flex items-center justify-between text-[11px]">
+                                      <span className="font-bold text-blue-900 truncate">
+                                        {seat.className}
+                                      </span>
+                                      <span className="font-mono text-slate-600 font-semibold text-[10px]">
+                                        R: {seat.rollNo}
+                                      </span>
+                                    </div>
+                                    <div className="text-xs font-bold text-slate-900 leading-tight truncate mt-0.5">
+                                      {seat.studentName}
+                                    </div>
+                                    <div className="text-[10px] font-mono text-slate-400 truncate">
+                                      {seat.studentId}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="text-center py-3 text-[11px] font-semibold text-slate-400">
+                                    VACANT DESK
+                                  </div>
+                                )}
 
                               {/* Bottom bar actions */}
                               <div className="flex items-center justify-between pt-1 border-t border-slate-200/50 text-[10px]">
@@ -914,22 +1221,45 @@ export const SittingArrangementView: React.FC = () => {
                                   {occupied ? 'Click to swap' : 'Empty'}
                                 </span>
 
-                                {occupied && !currentPlan.locked && (
-                                  <button
-                                    onClick={e => {
-                                      e.stopPropagation();
-                                      handleEmptySeat(seat.seatNo);
-                                    }}
-                                    className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
-                                    title="Empty seat"
-                                  >
-                                    <XCircle className="w-3 h-3" />
-                                  </button>
-                                )}
+                                <div className="flex items-center gap-1">
+                                  {!currentPlan.locked && (
+                                    <button
+                                      type="button"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setEditingSeat({
+                                          seatNo: seat.seatNo,
+                                          className: seat.className,
+                                          rollNo: seat.rollNo,
+                                          studentName: seat.studentName
+                                        });
+                                      }}
+                                      className="text-slate-400 hover:text-blue-600 p-0.5 cursor-pointer"
+                                      title="Edit seat class or roll number"
+                                    >
+                                      <Edit2 className="w-3 h-3" />
+                                    </button>
+                                  )}
+
+                                  {occupied && !currentPlan.locked && (
+                                    <button
+                                      type="button"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        handleEmptySeat(seat.seatNo);
+                                      }}
+                                      className="text-slate-400 hover:text-red-600 p-0.5 cursor-pointer"
+                                      title="Empty seat"
+                                    >
+                                      <XCircle className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          );
-                        })}
+                          </React.Fragment>
+                        );
+                      })}
                       </div>
                     </div>
                   );
@@ -989,6 +1319,27 @@ export const SittingArrangementView: React.FC = () => {
                       Jumbo
                     </button>
                   </div>
+
+                  {/* Quick Door/Window Controls for Notice Board */}
+                  <div className="flex items-center gap-1.5 print:hidden">
+                    <button
+                      type="button"
+                      onClick={handleSwapDoorWindow}
+                      className="px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors shadow-2xs"
+                      title="Swap Door and Window Sides"
+                    >
+                      ⇄ Swap Door & Window
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowDoorWindowModal(true)}
+                      className="px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 cursor-pointer transition-colors shadow-2xs"
+                      title="Edit Door & Window Labels"
+                    >
+                      <Edit2 className="w-3 h-3 inline mr-1" />
+                      Edit Door/Window
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1030,13 +1381,56 @@ export const SittingArrangementView: React.FC = () => {
               {/* Hall Info Bar */}
               <div className="my-3 py-2 px-4 rounded-lg bg-slate-100 border border-slate-300 flex items-center justify-between text-xs font-bold text-slate-800 uppercase">
                 <span>Room / Hall: <strong className="text-blue-900 text-sm">{currentHall?.hallName} ({currentPlan.hallId})</strong></span>
-                <span>Arrangement: {currentHall?.rows} Rows × {currentHall?.columns} Columns</span>
+                <span>
+                  Arrangement: {currentHall?.rows} Rows × {currentHall?.columns} Columns
+                  {shouldSplit ? ` (Splits into 2 Parts: ${splitCol}+${totalCols - splitCol} with Central Aisle)` : ''}
+                </span>
                 <span>Seated: {occupiedSeatsCount} / {currentPlan.seats.length} Desks</span>
               </div>
 
-              {/* Front of Room marker */}
-              <div className="mb-3 py-1.5 text-center bg-slate-200 text-slate-800 text-xs font-black uppercase tracking-widest border border-slate-300 rounded">
-                ▲ BLACKBOARD / TEACHER'S DESK / FRONT OF EXAMINATION ROOM ▲
+              {/* Notice Board Head: Door | Blackboard | Window */}
+              <div className="my-3 grid grid-cols-12 items-stretch border-2 border-black rounded-lg overflow-hidden bg-white text-black font-bold">
+                {/* Left Head */}
+                <div className={`col-span-3 p-2.5 border-r-2 border-black flex items-center justify-center gap-2 ${
+                  doorSide === 'LEFT' ? 'bg-red-50 text-red-950' : 'bg-sky-50 text-sky-950'
+                }`}>
+                  <span className="text-xl">{doorSide === 'LEFT' ? '🚪' : '🪟'}</span>
+                  <div className="text-center">
+                    <div className="text-xs font-black uppercase tracking-wide">
+                      {doorSide === 'LEFT' ? doorLabel : windowLabel}
+                    </div>
+                    <div className="text-[9px] text-slate-600 font-medium">
+                      {doorSide === 'LEFT' ? '(प्रवेश द्वार / ENTRANCE)' : '(हवा / VENTILATION)'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Center Head */}
+                <div className="col-span-6 p-2 text-center bg-slate-200 flex flex-col items-center justify-center">
+                  <div className="text-xs sm:text-sm font-black uppercase tracking-widest text-slate-900">
+                    ▲ BLACKBOARD / TEACHER'S DESK / FRONT OF EXAMINATION ROOM ▲
+                  </div>
+                  <div className="text-[10px] text-slate-700 font-bold mt-0.5">
+                    {shouldSplit
+                      ? `PART 1 (COLS 1 TO ${splitCol})  •  [CENTRAL WALKWAY / रास्ता]  •  PART 2 (COLS ${splitCol + 1} TO ${totalCols})`
+                      : `EXAMINATION SEATING MATRIX`}
+                  </div>
+                </div>
+
+                {/* Right Head */}
+                <div className={`col-span-3 p-2.5 border-l-2 border-black flex items-center justify-center gap-2 ${
+                  windowSide === 'RIGHT' ? 'bg-sky-50 text-sky-950' : 'bg-red-50 text-red-950'
+                }`}>
+                  <span className="text-xl">{windowSide === 'RIGHT' ? '🪟' : '🚪'}</span>
+                  <div className="text-center">
+                    <div className="text-xs font-black uppercase tracking-wide">
+                      {windowSide === 'RIGHT' ? windowLabel : doorLabel}
+                    </div>
+                    <div className="text-[9px] text-slate-600 font-medium">
+                      {windowSide === 'RIGHT' ? '(हवा / VENTILATION)' : '(प्रवेश द्वार / ENTRANCE)'}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* ROW & COLUMN WISE NOTICE BOARD TABLE (LARGE FONT CLASS & ROLL NO) */}
@@ -1055,17 +1449,42 @@ export const SittingArrangementView: React.FC = () => {
                           currentAssignedClasses[cIdx]?.className;
 
                         return (
-                          <th
-                            key={colNum}
-                            className="border-2 border-black py-2 px-3 text-center bg-slate-100"
-                          >
-                            <div className="text-[10px] font-bold text-slate-600 uppercase">
-                              Col {colNum}
-                            </div>
-                            <div className="text-xs sm:text-sm font-black text-blue-900 uppercase truncate">
-                              {colClass || `Column ${colNum}`}
-                            </div>
-                          </th>
+                          <React.Fragment key={colNum}>
+                            {/* Central Aisle Header in Notice Board between Part 1 and Part 2 */}
+                            {shouldSplit && colNum === splitCol + 1 && (
+                              <th className="border-2 border-black py-2 px-1 text-center bg-amber-100 text-amber-950 w-16 text-[10px] font-black uppercase">
+                                <div>AISLE</div>
+                                <div className="text-[8px] font-bold">गैलरी / रास्ता</div>
+                              </th>
+                            )}
+
+                            <th
+                              className="border-2 border-black py-2 px-3 text-center bg-slate-100 relative group"
+                            >
+                              <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-slate-600 uppercase">
+                                <span>Col {colNum}</span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setEditingColumn({
+                                      colNum,
+                                      currentClass: colClass || '',
+                                      customClassName: colClass || '',
+                                      targetScope: 'SINGLE',
+                                      mode: 'FILL_STUDENTS'
+                                    })
+                                  }
+                                  title={`Edit Class for Column ${colNum} and relative desks`}
+                                  className="print:hidden opacity-60 group-hover:opacity-100 p-0.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded cursor-pointer transition-opacity"
+                                >
+                                  <Edit2 className="w-2.5 h-2.5" />
+                                </button>
+                              </div>
+                              <div className="text-xs sm:text-sm font-black text-blue-900 uppercase truncate">
+                                {colClass || `Column ${colNum}`}
+                              </div>
+                            </th>
+                          </React.Fragment>
                         );
                       })}
                     </tr>
@@ -1087,8 +1506,9 @@ export const SittingArrangementView: React.FC = () => {
                             const colNum = cIdx + 1;
                             const seat = rowSeats.find(s => s.column === colNum);
                             const occupied = seat && seat.studentName.trim() !== '';
-                            const isDoor = seat && seat.doorWindow.includes('DOOR');
-                            const isWindow = seat && seat.doorWindow.includes('WINDOW');
+                            const { isDoor, isWindow } = seat
+                              ? getSeatDoorWindowStatus(seat, currentHall?.columns || 0)
+                              : { isDoor: false, isWindow: false };
 
                             const rollFontSize =
                               fontSizeScale === 'jumbo'
@@ -1105,47 +1525,59 @@ export const SittingArrangementView: React.FC = () => {
                                 : 'text-xs';
 
                             return (
-                              <td
-                                key={colNum}
-                                className="border-2 border-black p-2 align-middle bg-white min-w-[105px] h-24"
-                              >
-                                {seat ? (
-                                  occupied ? (
-                                    <div className="flex flex-col items-center justify-center h-full">
-                                      {/* Seat coordinate and Door/Window indicator */}
-                                      <div className="w-full flex items-center justify-between text-[9px] font-mono font-bold text-slate-400 mb-0.5">
-                                        <span>{seat.seatNo}</span>
-                                        <div className="flex items-center gap-0.5">
-                                          {isDoor && <span className="text-red-700 bg-red-100 px-1 rounded font-extrabold text-[8px]">DOOR</span>}
-                                          {isWindow && <span className="text-sky-700 bg-sky-100 px-1 rounded font-extrabold text-[8px]">WIN</span>}
+                              <React.Fragment key={colNum}>
+                                {/* Central Aisle Cell in Notice Board between Part 1 and Part 2 */}
+                                {shouldSplit && colNum === splitCol + 1 && (
+                                  <td className="border-2 border-black bg-slate-100 text-center align-middle w-16 p-1">
+                                    <div className="flex flex-col items-center justify-center font-mono text-slate-500">
+                                      <span className="text-[8px] font-black tracking-widest uppercase">AISLE</span>
+                                      <span className="text-[7px] text-slate-400">गैलरी / रास्ता</span>
+                                      <span className="text-slate-400 font-mono text-xs">║</span>
+                                    </div>
+                                  </td>
+                                )}
+
+                                <td
+                                  className="border-2 border-black p-2 align-middle bg-white min-w-[105px] h-24"
+                                >
+                                  {seat ? (
+                                    occupied ? (
+                                      <div className="flex flex-col items-center justify-center h-full">
+                                        {/* Seat coordinate and Door/Window indicator */}
+                                        <div className="w-full flex items-center justify-between text-[9px] font-mono font-bold text-slate-400 mb-0.5">
+                                          <span>{seat.seatNo}</span>
+                                          <div className="flex items-center gap-0.5">
+                                            {isDoor && <span className="text-red-700 bg-red-100 px-1 rounded font-extrabold text-[8px]" title="Door Entrance Desk">DOOR</span>}
+                                            {isWindow && <span className="text-sky-700 bg-sky-100 px-1 rounded font-extrabold text-[8px]" title="Window Desk">WIN</span>}
+                                          </div>
+                                        </div>
+
+                                        {/* SIRF CLASS (BOLD UPPERCASE) */}
+                                        <div className={`font-black text-blue-900 uppercase tracking-wide leading-tight ${classFontSize}`}>
+                                          {seat.className}
+                                        </div>
+
+                                        {/* SIRF ROLL NUMBER (LARGE FONT) */}
+                                        <div className="mt-0.5 flex items-baseline justify-center gap-1">
+                                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                                            ROLL
+                                          </span>
+                                          <span className={`font-black text-black font-mono tracking-tight leading-none ${rollFontSize}`}>
+                                            {seat.rollNo}
+                                          </span>
                                         </div>
                                       </div>
-
-                                      {/* SIRF CLASS (BOLD UPPERCASE) */}
-                                      <div className={`font-black text-blue-900 uppercase tracking-wide leading-tight ${classFontSize}`}>
-                                        {seat.className}
+                                    ) : (
+                                      <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                                        <span className="text-[9px] font-mono">{seat.seatNo}</span>
+                                        <span className="text-xs font-bold mt-1">— VACANT —</span>
                                       </div>
-
-                                      {/* SIRF ROLL NUMBER (LARGE FONT) */}
-                                      <div className="mt-0.5 flex items-baseline justify-center gap-1">
-                                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                                          ROLL
-                                        </span>
-                                        <span className={`font-black text-black font-mono tracking-tight leading-none ${rollFontSize}`}>
-                                          {seat.rollNo}
-                                        </span>
-                                      </div>
-                                    </div>
+                                    )
                                   ) : (
-                                    <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                                      <span className="text-[9px] font-mono">{seat.seatNo}</span>
-                                      <span className="text-xs font-bold mt-1">— VACANT —</span>
-                                    </div>
-                                  )
-                                ) : (
-                                  <span className="text-slate-300 text-xs">—</span>
-                                )}
-                              </td>
+                                    <span className="text-slate-300 text-xs">—</span>
+                                  )}
+                                </td>
+                              </React.Fragment>
                             );
                           })}
                         </tr>
@@ -1174,6 +1606,421 @@ export const SittingArrangementView: React.FC = () => {
                   Exam Controller / Center Superintendent
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Advanced Edit Column & Relative Desks Modal */}
+      {editingColumn && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+              <div className="flex items-center gap-2 font-bold text-slate-900">
+                <Edit2 className="w-4 h-4 text-blue-600" />
+                <span>Edit Class for Column {editingColumn.colNum} & Relative Desks</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingColumn(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* Class input & quick select */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                  Select or Enter Class Name:
+                </label>
+                <div className="flex flex-wrap gap-1.5 mb-2.5">
+                  {settings.classes.map(cls => (
+                    <button
+                      key={cls}
+                      type="button"
+                      onClick={() =>
+                        setEditingColumn(prev =>
+                          prev ? { ...prev, customClassName: cls } : null
+                        )
+                      }
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                        editingColumn.customClassName === cls
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-blue-400'
+                      }`}
+                    >
+                      {cls}
+                    </button>
+                  ))}
+                </div>
+
+                <input
+                  type="text"
+                  value={editingColumn.customClassName}
+                  onChange={e =>
+                    setEditingColumn(prev =>
+                      prev ? { ...prev, customClassName: e.target.value } : null
+                    )
+                  }
+                  placeholder="e.g. X-A, IX-B, XII-COMMERCE..."
+                  className="w-full px-3.5 py-2.5 text-sm font-bold text-slate-900 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Scope (Relative / Sabhi Column) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                  Application Scope (लागू करने का दायरा):
+                </label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer text-xs font-medium text-slate-800">
+                    <input
+                      type="radio"
+                      name="scope"
+                      checked={editingColumn.targetScope === 'SINGLE'}
+                      onChange={() =>
+                        setEditingColumn(prev =>
+                          prev ? { ...prev, targetScope: 'SINGLE' } : null
+                        )
+                      }
+                      className="text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="font-bold">Column {editingColumn.colNum} Only</div>
+                      <div className="text-slate-500 text-[11px]">
+                        Updates all {currentHall?.rows || 0} desks in Column {editingColumn.colNum}
+                      </div>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer text-xs font-medium text-slate-800">
+                    <input
+                      type="radio"
+                      name="scope"
+                      checked={editingColumn.targetScope === 'ALTERNATING'}
+                      onChange={() =>
+                        setEditingColumn(prev =>
+                          prev ? { ...prev, targetScope: 'ALTERNATING' } : null
+                        )
+                      }
+                      className="text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="font-bold">
+                        Alternating Columns ({editingColumn.colNum % 2 === 0 ? 'Even Cols: 2, 4, 6...' : 'Odd Cols: 1, 3, 5...'})
+                      </div>
+                      <div className="text-slate-500 text-[11px]">
+                        Applies this class to alternate benches across the hall (common exam pattern)
+                      </div>
+                    </div>
+                  </label>
+
+                  <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 cursor-pointer text-xs font-medium text-slate-800">
+                    <input
+                      type="radio"
+                      name="scope"
+                      checked={editingColumn.targetScope === 'ALL'}
+                      onChange={() =>
+                        setEditingColumn(prev =>
+                          prev ? { ...prev, targetScope: 'ALL' } : null
+                        )
+                      }
+                      className="text-blue-600 focus:ring-blue-500"
+                    />
+                    <div>
+                      <div className="font-bold">All Columns (सभी कॉलम)</div>
+                      <div className="text-slate-500 text-[11px]">
+                        Sets all {currentHall?.columns || 0} columns in this hall to this class
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Student filling mode */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                  Desks & Roll Number Option:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingColumn(prev =>
+                        prev ? { ...prev, mode: 'FILL_STUDENTS' } : null
+                      )
+                    }
+                    className={`p-2.5 rounded-xl text-xs font-semibold border text-left cursor-pointer transition-colors ${
+                      editingColumn.mode === 'FILL_STUDENTS'
+                        ? 'bg-blue-50 border-blue-500 text-blue-900'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="font-bold">Assign Students</div>
+                    <div className="text-[10px] text-slate-500">Seat registered students from database</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingColumn(prev =>
+                        prev ? { ...prev, mode: 'KEEP_ROLLS' } : null
+                      )
+                    }
+                    className={`p-2.5 rounded-xl text-xs font-semibold border text-left cursor-pointer transition-colors ${
+                      editingColumn.mode === 'KEEP_ROLLS'
+                        ? 'bg-blue-50 border-blue-500 text-blue-900'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="font-bold">Keep Existing Rolls</div>
+                    <div className="text-[10px] text-slate-500">Only change class label on desks</div>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setEditingColumn(null)}
+                className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-100 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleColumnClassChange(
+                    editingColumn.colNum,
+                    editingColumn.customClassName,
+                    editingColumn.targetScope,
+                    editingColumn.mode
+                  )
+                }
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs cursor-pointer"
+              >
+                Apply & Update Relative Desks
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Individual Seat Edit Modal */}
+      {editingSeat && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+              <div className="flex items-center gap-2 font-bold text-slate-900">
+                <Edit2 className="w-4 h-4 text-blue-600" />
+                <span>Edit Desk {editingSeat.seatNo} Details</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingSeat(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSeatDetails}>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Class (कक्षा):
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editingSeat.className}
+                    onChange={e =>
+                      setEditingSeat(prev =>
+                        prev ? { ...prev, className: e.target.value } : null
+                      )
+                    }
+                    placeholder="e.g. X-A"
+                    className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Roll Number (रोल नंबर):
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editingSeat.rollNo}
+                    onChange={e =>
+                      setEditingSeat(prev =>
+                        prev ? { ...prev, rollNo: e.target.value } : null
+                      )
+                    }
+                    placeholder="e.g. 01"
+                    className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Student Name (छात्र का नाम - Optional):
+                  </label>
+                  <input
+                    type="text"
+                    value={editingSeat.studentName}
+                    onChange={e =>
+                      setEditingSeat(prev =>
+                        prev ? { ...prev, studentName: e.target.value } : null
+                      )
+                    }
+                    placeholder="e.g. Rahul Sharma"
+                    className="w-full px-3 py-2 text-xs font-semibold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setEditingSeat(null)}
+                  className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-100 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs cursor-pointer"
+                >
+                  Save Desk Details
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Door & Window Configuration Modal */}
+      {showDoorWindowModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+              <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
+                <DoorOpen className="w-5 h-5 text-blue-600" />
+                <span>Door & Window Configuration (दरवाजा व खिड़की)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDoorWindowModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs">
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 text-[11px] leading-relaxed">
+                हॉल के हेड (ब्लैकबोर्ड के साथ) में एक तरफ दरवाजा (Door) और दूसरी तरफ खिड़की (Window) प्रदर्शित होती है। आप दोनों की दिशा और नाम आसानी से कस्टमाइज कर सकते हैं।
+              </div>
+
+              {/* Side Swap Presets */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                  Door & Window Layout (दिशा):
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDoorSide('LEFT');
+                      setWindowSide('RIGHT');
+                    }}
+                    className={`p-3 rounded-xl border-2 text-left font-bold transition-all cursor-pointer ${
+                      doorSide === 'LEFT'
+                        ? 'border-blue-600 bg-blue-50 text-blue-950 ring-1 ring-blue-500'
+                        : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-base">🚪 ⇄ 🪟</span>
+                      {doorSide === 'LEFT' && <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-bold">Active</span>}
+                    </div>
+                    <div className="text-xs font-black">Door Left, Window Right</div>
+                    <div className="text-[10px] text-slate-500 font-normal">बाईं तरफ दरवाजा, दाईं तरफ खिड़की</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDoorSide('RIGHT');
+                      setWindowSide('LEFT');
+                    }}
+                    className={`p-3 rounded-xl border-2 text-left font-bold transition-all cursor-pointer ${
+                      doorSide === 'RIGHT'
+                        ? 'border-blue-600 bg-blue-50 text-blue-950 ring-1 ring-blue-500'
+                        : 'border-slate-200 hover:border-slate-300 text-slate-700 bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-base">🪟 ⇄ 🚪</span>
+                      {doorSide === 'RIGHT' && <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded-full font-bold">Active</span>}
+                    </div>
+                    <div className="text-xs font-black">Window Left, Door Right</div>
+                    <div className="text-[10px] text-slate-500 font-normal">बाईं तरफ खिड़की, दाईं तरफ दरवाजा</div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Editable Label Inputs */}
+              <div className="space-y-3 pt-2 border-t border-slate-100">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Door Label (दरवाजे का नाम/लेबल):
+                  </label>
+                  <input
+                    type="text"
+                    value={doorLabel}
+                    onChange={e => setDoorLabel(e.target.value)}
+                    placeholder="e.g. DOOR / मुख्य द्वार / GATE 1"
+                    className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Window Label (खिड़की का नाम/लेबल):
+                  </label>
+                  <input
+                    type="text"
+                    value={windowLabel}
+                    onChange={e => setWindowLabel(e.target.value)}
+                    placeholder="e.g. WINDOW / खिड़की"
+                    className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowDoorWindowModal(false)}
+                className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-100 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleSaveDoorWindowConfig(doorSide, windowSide, doorLabel, windowLabel);
+                  setShowDoorWindowModal(false);
+                }}
+                className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs cursor-pointer"
+              >
+                Save & Apply (लागू करें)
+              </button>
             </div>
           </div>
         </div>

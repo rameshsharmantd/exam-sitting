@@ -102,6 +102,21 @@ interface SchoolContextType {
   getClassSeatingStatus: (exam: string, session: string) => Record<string, ClassSeatingStatus>;
   swapSeats: (exam: string, session: string, hallId: string, seatA: string, seatB: string) => { success: boolean; message?: string };
   emptySeat: (exam: string, session: string, hallId: string, seatNo: string) => { success: boolean; message?: string };
+  updateColumnClass: (
+    exam: string,
+    session: string,
+    hallId: string,
+    columnNumber: number,
+    newClassName: string,
+    seatStudentsMode?: 'FILL_STUDENTS' | 'KEEP_ROLLS' | 'ONLY_LABEL'
+  ) => { success: boolean; message?: string };
+  updateSeatDetails: (
+    exam: string,
+    session: string,
+    hallId: string,
+    seatNo: string,
+    details: { className?: string; rollNo?: string; studentName?: string; studentId?: string }
+  ) => { success: boolean; message?: string };
   lockSitting: (exam: string, session: string, hallId: string) => { success: boolean };
   unlockSitting: (exam: string, session: string, hallId: string) => { success: boolean };
 
@@ -1009,6 +1024,142 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return { success: true };
   };
 
+  const updateColumnClass = (
+    exam: string,
+    session: string,
+    hallId: string,
+    columnNumber: number,
+    newClassName: string,
+    seatStudentsMode: 'FILL_STUDENTS' | 'KEEP_ROLLS' | 'ONLY_LABEL' = 'FILL_STUDENTS'
+  ) => {
+    const key = `${exam}_${session}_${hallId}`;
+    const plan = sittingPlans[key];
+    if (!plan) return { success: false, message: 'Sitting plan not found.' };
+    if (plan.locked) return { success: false, message: 'Sitting arrangement is locked. Please unlock first.' };
+
+    const cleanClass = newClassName.trim().toUpperCase();
+
+    // 1. Get existing students for this class if any
+    const classStudents = cleanClass ? getStudentsByClass(cleanClass) : [];
+
+    let studentIndex = 0;
+    const newSeats = plan.seats.map(seat => {
+      if (seat.column === columnNumber) {
+        if (!cleanClass) {
+          return {
+            ...seat,
+            className: '',
+            rollNo: '',
+            studentId: '',
+            studentName: '',
+            recordKey: ''
+          };
+        }
+
+        if (seatStudentsMode === 'ONLY_LABEL') {
+          return {
+            ...seat,
+            className: cleanClass
+          };
+        }
+
+        if (classStudents.length > 0 && studentIndex < classStudents.length) {
+          const st = classStudents[studentIndex++];
+          return {
+            ...seat,
+            className: cleanClass,
+            rollNo: st.rollNo,
+            studentId: st.studentId,
+            studentName: st.name,
+            recordKey: st.recordKey
+          };
+        } else if (seat.rollNo && seat.rollNo.trim() !== '') {
+          // Keep existing roll, update class and studentId
+          return {
+            ...seat,
+            className: cleanClass,
+            studentId: makeStudentId(cleanClass, Number(seat.rollNo) || seat.row)
+          };
+        } else {
+          // Assign sequential roll for this class
+          const rollNum = String(seat.row).padStart(2, '0');
+          return {
+            ...seat,
+            className: cleanClass,
+            rollNo: rollNum,
+            studentId: makeStudentId(cleanClass, Number(seat.row)),
+            studentName: `Student ${cleanClass}-${rollNum}`,
+            recordKey: `manual-${cleanClass}-${rollNum}-${Date.now()}`
+          };
+        }
+      }
+      return seat;
+    });
+
+    setSittingPlans(prev => ({
+      ...prev,
+      [key]: {
+        ...plan,
+        seats: newSeats,
+        updatedAt: new Date().toISOString()
+      }
+    }));
+
+    // Also update hallClassMaps so the assigned classes for this hall keep in sync
+    setHallClassMaps(prev => {
+      const filtered = prev.filter(
+        m => !(m.exam === exam && m.session === session && m.hallId === hallId && m.order === columnNumber)
+      );
+      if (!cleanClass) return filtered;
+      const newItem: HallClassMapItem = {
+        exam,
+        session,
+        hallId,
+        hallName: plan.hallName,
+        className: cleanClass,
+        order: columnNumber,
+        active: true
+      };
+      return [...filtered, newItem].sort((a, b) => a.order - b.order);
+    });
+
+    logActivity('COLUMN_CLASS_UPDATED', '', cleanClass, `${hallId}: Column ${columnNumber} set to Class ${cleanClass}`);
+    return { success: true };
+  };
+
+  const updateSeatDetails = (
+    exam: string,
+    session: string,
+    hallId: string,
+    seatNo: string,
+    details: { className?: string; rollNo?: string; studentName?: string; studentId?: string }
+  ) => {
+    const key = `${exam}_${session}_${hallId}`;
+    const plan = sittingPlans[key];
+    if (!plan) return { success: false, message: 'Sitting plan not found.' };
+    if (plan.locked) return { success: false, message: 'Sitting arrangement is locked. Please unlock first.' };
+
+    const idx = plan.seats.findIndex(s => s.seatNo === seatNo);
+    if (idx === -1) return { success: false, message: 'Seat not found.' };
+
+    const newSeats = [...plan.seats];
+    newSeats[idx] = {
+      ...newSeats[idx],
+      ...details
+    };
+
+    setSittingPlans(prev => ({
+      ...prev,
+      [key]: {
+        ...plan,
+        seats: newSeats,
+        updatedAt: new Date().toISOString()
+      }
+    }));
+
+    return { success: true };
+  };
+
   const lockSitting = (exam: string, session: string, hallId: string) => {
     const key = `${exam}_${session}_${hallId}`;
     const plan = sittingPlans[key];
@@ -1204,6 +1355,8 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         getClassSeatingStatus,
         swapSeats,
         emptySeat,
+        updateColumnClass,
+        updateSeatDetails,
         lockSitting,
         unlockSitting,
         attendanceRecords,

@@ -84,7 +84,8 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         <div className="flex items-center gap-3 min-w-0">
           <button
             onClick={onOpenSidebar}
-            className="lg:hidden p-2 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer"
+            className="p-2 rounded-lg text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-200 cursor-pointer shadow-2xs transition-colors"
+            title="Toggle Navigation Menu"
             aria-label="Open sidebar"
           >
             <Menu className="w-5 h-5" />

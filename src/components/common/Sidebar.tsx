@@ -52,33 +52,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <>
-      {/* Mobile overlay */}
+      {/* Drawer overlay */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-slate-900/60 z-40 lg:hidden backdrop-blur-xs"
+          className="fixed inset-0 bg-slate-900/60 z-40 backdrop-blur-xs transition-opacity"
           onClick={onClose}
         />
       )}
 
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 w-64 bg-slate-900 text-slate-200 flex flex-col transition-transform duration-200 ease-in-out lg:translate-x-0 ${
+        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-slate-900 text-slate-200 flex flex-col transition-transform duration-200 ease-in-out shadow-2xl ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
         {/* Brand header */}
-        <div className="p-4 border-b border-slate-800 flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
-            <GraduationCap className="w-6 h-6" />
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
+              <GraduationCap className="w-6 h-6" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="font-bold text-sm text-white leading-tight truncate">
+                Manthan Valley
+              </h1>
+              <p className="text-[11px] text-blue-400 font-medium">St. Albert’s Sr. Sec. School</p>
+              <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                Exam System v2.6
+              </span>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h1 className="font-bold text-sm text-white leading-tight truncate">
-              Manthan Valley
-            </h1>
-            <p className="text-[11px] text-blue-400 font-medium">St. Albert’s Sr. Sec. School</p>
-            <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
-              Exam System v2.6
-            </span>
-          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg cursor-pointer"
+            title="Close Menu"
+          >
+            ✕
+          </button>
         </div>
 
         {/* Navigation list */}
