@@ -1132,21 +1132,18 @@ export const SittingArrangementView: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* Center (Blackboard & 2-Part Wings info) */}
+                  {/* Center (Hall Name in Large & Blackboard Front) */}
                   <div className="flex flex-col items-center justify-center text-center px-4">
-                    <div className="text-xs sm:text-sm font-black uppercase tracking-widest text-slate-100 flex items-center gap-2">
+                    <div className="text-base sm:text-2xl font-black uppercase tracking-wide text-white flex items-center justify-center gap-2">
+                      <span>{currentHall.hallName}</span>
+                      <span className="text-xs sm:text-sm font-bold text-amber-300 font-mono bg-slate-800/90 px-2.5 py-0.5 rounded-md border border-amber-400/40">
+                        {currentHall.hallId}
+                      </span>
+                    </div>
+                    <div className="text-[10px] sm:text-xs font-extrabold uppercase tracking-widest text-slate-300 flex items-center gap-1.5 mt-0.5">
                       <span className="text-amber-400">▲</span>
                       <span>BLACKBOARD / TEACHER'S DESK / FRONT OF EXAMINATION HALL</span>
                       <span className="text-amber-400">▲</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[10px] text-blue-300 font-semibold mt-0.5">
-                      {shouldSplit ? (
-                        <span>
-                          Wing A (Cols 1-{splitCol}) &nbsp;•&nbsp; ║ Central Walkway (गैलरी / रास्ता) ║ &nbsp;•&nbsp; Wing B (Cols {splitCol + 1}-{totalCols})
-                        </span>
-                      ) : (
-                        <span>Examination Hall Seating Matrix</span>
-                      )}
                     </div>
                   </div>
 
@@ -1756,14 +1753,15 @@ export const SittingArrangementView: React.FC = () => {
                         </div>
 
                         {/* Center Head */}
-                        <div className={`col-span-6 text-center bg-slate-200 flex flex-col items-center justify-center ${isHalfPage ? 'p-1' : 'p-2'}`}>
-                          <div className={`${isHalfPage ? 'text-[10px]' : 'text-xs sm:text-sm'} font-black uppercase tracking-widest text-slate-900`}>
-                            ▲ BLACKBOARD / FRONT OF EXAMINATION ROOM ▲
+                        <div className={`col-span-6 text-center bg-slate-100 flex flex-col items-center justify-center ${isHalfPage ? 'p-1' : 'p-2'}`}>
+                          <div className={`${isHalfPage ? 'text-xs sm:text-base print:text-sm' : 'text-lg sm:text-2xl'} font-black uppercase tracking-wide text-black flex items-center justify-center gap-2`}>
+                            <span>{targetHall.hallName}</span>
+                            <span className={`${isHalfPage ? 'text-[10px] print:text-[9px]' : 'text-xs sm:text-sm'} font-mono font-bold text-slate-700 bg-slate-200 px-1.5 py-0.5 rounded border border-slate-300`}>
+                              {targetHall.hallId}
+                            </span>
                           </div>
-                          <div className={`${isHalfPage ? 'text-[8px]' : 'text-[10px]'} text-slate-700 font-bold mt-0.5`}>
-                            {hallShouldSplit
-                              ? `PART 1 (COLS 1-${hallSplitCol}) • [AISLE / रास्ता] • PART 2 (COLS ${hallSplitCol + 1}-${hallCols})`
-                              : `EXAMINATION SEATING MATRIX`}
+                          <div className={`${isHalfPage ? 'text-[8px] print:text-[7.5px]' : 'text-[10px]'} text-slate-700 font-extrabold uppercase tracking-widest mt-0.5`}>
+                            ▲ BLACKBOARD / FRONT OF EXAMINATION ROOM ▲
                           </div>
                         </div>
 
