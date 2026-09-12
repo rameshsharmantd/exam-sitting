@@ -7,10 +7,12 @@ import {
   Grid3X3,
   FileCheck,
   Eye,
-  Download
+  Download,
+  FileSpreadsheet
 } from 'lucide-react';
 import { useSchool } from '../../context/SchoolContext';
 import { HeaderPrint } from '../common/HeaderPrint';
+import { exportStudentsToExcel, exportStudentsToPDF } from '../../utils/studentExportUtils';
 
 export const ReportsView: React.FC = () => {
   const {
@@ -101,20 +103,58 @@ export const ReportsView: React.FC = () => {
         {/* Dynamic Filters depending on report */}
         <div className="mt-4 pt-4 border-t border-slate-200 flex flex-wrap items-center gap-4 text-xs">
           {activeReport === 'studentList' && (
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-700">Select Class:</span>
-              <select
-                value={selectedClass}
-                onChange={e => setSelectedClass(e.target.value)}
-                className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold text-slate-800"
-              >
-                <option value="ALL">All Classes Combined</option>
-                {settings.classes.map(cls => (
-                  <option key={cls} value={cls}>
-                    Class {cls}
-                  </option>
-                ))}
-              </select>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-700">Select Class:</span>
+                <select
+                  value={selectedClass}
+                  onChange={e => setSelectedClass(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold text-slate-800"
+                >
+                  <option value="ALL">All Classes Combined ({students.length})</option>
+                  {settings.classes.map(cls => (
+                    <option key={cls} value={cls}>
+                      Class {cls} ({students.filter(s => s.className === cls).length})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() =>
+                    exportStudentsToExcel(
+                      selectedClass === 'ALL' ? students : getStudentsByClass(selectedClass),
+                      {
+                        className: selectedClass,
+                        session: settings.defaultSession,
+                        schoolSettings: settings
+                      }
+                    )
+                  }
+                  className="px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Export Excel</span>
+                </button>
+
+                <button
+                  onClick={() =>
+                    exportStudentsToPDF(
+                      selectedClass === 'ALL' ? students : getStudentsByClass(selectedClass),
+                      {
+                        className: selectedClass,
+                        session: settings.defaultSession,
+                        schoolSettings: settings
+                      }
+                    )
+                  }
+                  className="px-3 py-1.5 rounded-lg border border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-800 font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                >
+                  <FileText className="w-3.5 h-3.5 text-rose-700" />
+                  <span>Download PDF</span>
+                </button>
+              </div>
             </div>
           )}
 

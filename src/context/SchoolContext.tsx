@@ -67,6 +67,10 @@ interface SchoolContextType {
     data: Omit<Student, 'rollNo' | 'studentId' | 'recordKey'>,
     confirmed?: boolean
   ) => { success: boolean; requiresConfirmation?: boolean; warnings?: string[]; student?: Student };
+  addStudentsBulk: (
+    studentsData: Array<Omit<Student, 'rollNo' | 'studentId' | 'recordKey'>>,
+    options?: { skipDuplicates?: boolean }
+  ) => { success: boolean; addedCount: number; skippedCount: number; warnings: string[]; addedStudents: Student[] };
   updateStudent: (
     data: Student,
     confirmed?: boolean
@@ -765,6 +769,102 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     logActivity('ADD_STUDENT', studentId, data.className, `Student added: ${data.name}`);
 
     return { success: true, student: newStudent };
+  };
+
+  const addStudentsBulk = (
+    studentsData: Array<Omit<Student, 'rollNo' | 'studentId' | 'recordKey'>>,
+    options: { skipDuplicates?: boolean } = { skipDuplicates: false }
+  ) => {
+    let currentList = [...students];
+    const newlyAdded: Student[] = [];
+    const warnings: string[] = [];
+    let skippedCount = 0;
+
+    // Track running counts per class to assign accurate sequential roll numbers
+    const classRollCounters: Record<string, number> = {};
+
+    // Initialize with existing student counts
+    currentList.forEach(s => {
+      classRollCounters[s.className] = Math.max(classRollCounters[s.className] || 0, parseInt(s.rollNo, 10) || 0);
+    });
+
+    for (const raw of studentsData) {
+      const cls = (raw.className || '').trim().toUpperCase();
+      const name = (raw.name || '').trim();
+
+      if (!cls || !name) {
+        skippedCount++;
+        warnings.push(`Skipped row with missing class or name.`);
+        continue;
+      }
+
+      // Check duplicates against current combined list
+      const dupNameFather = currentList.find(
+        s =>
+          s.className === cls &&
+          s.name.toLowerCase() === name.toLowerCase() &&
+          (raw.fatherName ? s.fatherName.toLowerCase() === raw.fatherName.trim().toLowerCase() : true)
+      );
+
+      const dupAdm = raw.admissionNo?.trim()
+        ? currentList.find(s => s.admissionNo.toLowerCase() === raw.admissionNo.trim().toLowerCase())
+        : null;
+
+      if (dupAdm) {
+        if (options.skipDuplicates) {
+          skippedCount++;
+          warnings.push(`Skipped "${name}": Admission No ${raw.admissionNo} already exists.`);
+          continue;
+        }
+      } else if (dupNameFather && options.skipDuplicates) {
+        skippedCount++;
+        warnings.push(`Skipped "${name}": Already enrolled in Class ${cls}.`);
+        continue;
+      }
+
+      const nextRoll = (classRollCounters[cls] || 0) + 1;
+      classRollCounters[cls] = nextRoll;
+      const rollNo = formatRoll(nextRoll);
+      const studentId = makeStudentId(cls, nextRoll);
+      const recordKey = generateUuid();
+
+      const createdStudent: Student = {
+        className: cls,
+        name,
+        fatherName: (raw.fatherName || '').trim(),
+        gender: raw.gender || '',
+        house: raw.house || '',
+        category: raw.category || 'General',
+        contact: (raw.contact || '').trim(),
+        admissionNo: (raw.admissionNo || '').trim(),
+        address: (raw.address || '').trim(),
+        remarks: (raw.remarks || '').trim(),
+        rollNo,
+        studentId,
+        recordKey
+      };
+
+      currentList.push(createdStudent);
+      newlyAdded.push(createdStudent);
+    }
+
+    if (newlyAdded.length > 0) {
+      setStudents(currentList);
+      logActivity(
+        'BULK_ADD_STUDENTS',
+        '',
+        '',
+        `Bulk imported ${newlyAdded.length} students across ${Object.keys(classRollCounters).length} classes`
+      );
+    }
+
+    return {
+      success: newlyAdded.length > 0,
+      addedCount: newlyAdded.length,
+      skippedCount,
+      warnings,
+      addedStudents: newlyAdded
+    };
   };
 
   const updateStudent = (data: Student, confirmed = false) => {
@@ -1857,6 +1957,7 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         getStudentByStudentId,
         checkDuplicates,
         addStudent,
+        addStudentsBulk,
         updateStudent,
         deleteStudent,
         searchStudents,

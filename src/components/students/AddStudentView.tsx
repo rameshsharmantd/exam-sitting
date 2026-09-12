@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { UserPlus, RotateCcw, CheckCircle, AlertCircle, Sparkles } from 'lucide-react';
+import { UserPlus, RotateCcw, CheckCircle, AlertCircle, Sparkles, UploadCloud } from 'lucide-react';
 import { useSchool } from '../../context/SchoolContext';
 import { CONFIG } from '../../data/constants';
 import { DuplicateWarningModal } from '../common/DuplicateWarningModal';
+import { BulkUploadModal } from './BulkUploadModal';
 
 export const AddStudentView: React.FC = () => {
   const { addStudent, settings, getStudentsByClass } = useSchool();
@@ -20,6 +21,7 @@ export const AddStudentView: React.FC = () => {
 
   const [duplicateWarnings, setDuplicateWarnings] = useState<string[]>([]);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -116,13 +118,24 @@ export const AddStudentView: React.FC = () => {
             </p>
           </div>
 
-          {/* Real-time Roll & ID Preview */}
-          <div className="px-3.5 py-2 rounded-xl bg-blue-50 border border-blue-200 flex items-center gap-3">
-            <Sparkles className="w-4 h-4 text-blue-600" />
-            <div className="text-xs">
-              <span className="text-slate-500">Auto-assigned ID: </span>
-              <span className="font-mono font-bold text-blue-700">{previewStudentId}</span>
-              <span className="text-slate-400"> (Roll: {previewRoll})</span>
+          {/* Real-time Roll & ID Preview and Bulk Upload option */}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowBulkModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <UploadCloud className="w-4 h-4" />
+              <span>Bulk Upload via Excel / CSV</span>
+            </button>
+
+            <div className="px-3.5 py-2 rounded-xl bg-blue-50 border border-blue-200 flex items-center gap-3">
+              <Sparkles className="w-4 h-4 text-blue-600" />
+              <div className="text-xs">
+                <span className="text-slate-500">Auto-assigned ID: </span>
+                <span className="font-mono font-bold text-blue-700">{previewStudentId}</span>
+                <span className="text-slate-400"> (Roll: {previewRoll})</span>
+              </div>
             </div>
           </div>
         </div>
@@ -323,6 +336,13 @@ export const AddStudentView: React.FC = () => {
         onConfirm={() => handleSubmit(true)}
         onCancel={() => setShowDuplicateModal(false)}
         title="Duplicate Student Detection"
+      />
+
+      {/* Bulk upload modal */}
+      <BulkUploadModal
+        isOpen={showBulkModal}
+        onClose={() => setShowBulkModal(false)}
+        defaultClass={className}
       />
     </div>
   );

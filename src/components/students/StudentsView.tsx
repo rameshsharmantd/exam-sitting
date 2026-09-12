@@ -6,12 +6,19 @@ import {
   Edit2,
   Trash2,
   FileText,
-  Filter
+  Filter,
+  UploadCloud,
+  FileSpreadsheet,
+  Printer,
+  ChevronDown
 } from 'lucide-react';
 import { useSchool } from '../../context/SchoolContext';
 import { Student, ActiveSection } from '../../types';
 import { StudentEditModal } from './StudentEditModal';
 import { StudentProfileModal } from './StudentProfileModal';
+import { BulkUploadModal } from './BulkUploadModal';
+import { ClassWisePrintModal } from './ClassWisePrintModal';
+import { exportStudentsToExcel, exportStudentsToPDF } from '../../utils/studentExportUtils';
 
 interface StudentsViewProps {
   onNavigate: (section: ActiveSection) => void;
@@ -25,6 +32,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({ onNavigate }) => {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [viewingProfileStudent, setViewingProfileStudent] = useState<Student | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<Student | null>(null);
+
+  // New Modals & Menus
+  const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
+  const [isClassPrintOpen, setIsClassPrintOpen] = useState(false);
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
   // Filter students
   const classStudents = getStudentsByClass(selectedClass === 'ALL' ? undefined : selectedClass);
@@ -54,7 +66,26 @@ export const StudentsView: React.FC<StudentsViewProps> = ({ onNavigate }) => {
     }
   };
 
+  const handleExportExcel = () => {
+    setIsExportMenuOpen(false);
+    exportStudentsToExcel(filteredStudents, {
+      className: selectedClass,
+      session: settings.defaultSession,
+      schoolSettings: settings
+    });
+  };
+
+  const handleExportPDF = () => {
+    setIsExportMenuOpen(false);
+    exportStudentsToPDF(filteredStudents, {
+      className: selectedClass,
+      session: settings.defaultSession,
+      schoolSettings: settings
+    });
+  };
+
   const handleExportCSV = () => {
+    setIsExportMenuOpen(false);
     const headers = [
       'Roll No.',
       'Name of Students',
@@ -100,8 +131,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({ onNavigate }) => {
   return (
     <div className="space-y-4">
       {/* Controls Bar */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 flex flex-col md:flex-row items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 flex flex-col lg:flex-row items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
           {/* Class selector */}
           <div className="flex items-center gap-1.5">
             <Filter className="w-4 h-4 text-slate-400 shrink-0" />
@@ -113,7 +144,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({ onNavigate }) => {
               <option value="ALL">All Classes ({students.length} students)</option>
               {settings.classes.map(cls => (
                 <option key={cls} value={cls}>
-                  Class {cls}
+                  Class {cls} ({students.filter(s => s.className === cls).length})
                 </option>
               ))}
             </select>
@@ -132,16 +163,73 @@ export const StudentsView: React.FC<StudentsViewProps> = ({ onNavigate }) => {
           </div>
         </div>
 
-        {/* Action buttons */}
-        <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+        {/* Action buttons toolbar */}
+        <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
+          {/* Class-wise Print Button */}
           <button
-            onClick={handleExportCSV}
-            className="px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-            title="Download CSV"
+            onClick={() => setIsClassPrintOpen(true)}
+            className="px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            title="Print Class-wise Roll List"
           >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export CSV</span>
+            <Printer className="w-3.5 h-3.5 text-slate-600" />
+            <span>Print {selectedClass === 'ALL' ? 'Class-wise' : `Class ${selectedClass}`}</span>
           </button>
+
+          {/* Export Dropdown (Excel, PDF, CSV) */}
+          <div className="relative">
+            <button
+              onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+              className="px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-600" />
+              <span>Export</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
+
+            {isExportMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-20"
+                  onClick={() => setIsExportMenuOpen(false)}
+                />
+                <div className="absolute right-0 mt-1.5 w-48 rounded-xl bg-white border border-slate-200 shadow-xl py-1 z-30 text-xs">
+                  <button
+                    onClick={handleExportExcel}
+                    className="w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2 font-medium cursor-pointer"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    <span>Export to Excel (.xlsx)</span>
+                  </button>
+                  <button
+                    onClick={handleExportPDF}
+                    className="w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2 font-medium cursor-pointer"
+                  >
+                    <FileText className="w-4 h-4 text-rose-600" />
+                    <span>Export to PDF (.pdf)</span>
+                  </button>
+                  <button
+                    onClick={handleExportCSV}
+                    className="w-full px-3 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2 font-medium cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 text-blue-600" />
+                    <span>Export to CSV (.csv)</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Bulk Upload Button */}
+          <button
+            onClick={() => setIsBulkUploadOpen(true)}
+            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer"
+            title="Bulk Upload Students from Excel or CSV"
+          >
+            <UploadCloud className="w-3.5 h-3.5" />
+            <span>Bulk Upload</span>
+          </button>
+
+          {/* Add Single Student Button */}
           <button
             onClick={() => onNavigate('addStudent')}
             className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer"
@@ -313,6 +401,22 @@ export const StudentsView: React.FC<StudentsViewProps> = ({ onNavigate }) => {
           </div>
         </div>
       )}
+
+      {/* Bulk Upload Modal */}
+      <BulkUploadModal
+        isOpen={isBulkUploadOpen}
+        onClose={() => setIsBulkUploadOpen(false)}
+        defaultClass={selectedClass}
+      />
+
+      {/* Class-wise Printable Register Modal */}
+      <ClassWisePrintModal
+        isOpen={isClassPrintOpen}
+        onClose={() => setIsClassPrintOpen(false)}
+        selectedClass={selectedClass}
+        students={filteredStudents}
+        settings={settings}
+      />
     </div>
   );
 };
