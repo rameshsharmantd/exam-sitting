@@ -1,6 +1,7 @@
 import React from 'react';
-import { Menu, ShieldCheck, Calendar, Bell } from 'lucide-react';
+import { Menu, ShieldCheck, Calendar, Bell, Database, RefreshCw, ExternalLink } from 'lucide-react';
 import { ActiveSection } from '../../types';
+import { useSchool } from '../../context/SchoolContext';
 
 interface TopNavbarProps {
   activeSection: ActiveSection;
@@ -10,6 +11,7 @@ interface TopNavbarProps {
   defaultSession: string;
   recentActivityCount?: number;
   onViewActivity?: () => void;
+  onGoToSettings?: () => void;
 }
 
 const SECTION_TITLES: Record<ActiveSection, { title: string; subtitle: string }> = {
@@ -74,8 +76,18 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   defaultExam,
   defaultSession,
   recentActivityCount = 0,
-  onViewActivity
+  onViewActivity,
+  onGoToSettings
 }) => {
+  const {
+    supabaseConnected,
+    supabaseConfig,
+    isSyncing,
+    syncStatusMessage,
+    syncError,
+    pushToSupabase
+  } = useSchool();
+
   const meta = SECTION_TITLES[activeSection] || {
     title: 'School Management',
     subtitle: 'Manthan Valley St. Albert’s Sr. Sec. School'
@@ -106,6 +118,44 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 
         {/* Right: Badges & Profile */}
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Supabase Database Status */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
+              supabaseConnected
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-amber-50 border-amber-200 text-amber-800'
+            }`}
+            title={`Supabase Cloud DB: ${supabaseConfig.projectId} (${supabaseConnected ? 'Connected' : 'Connecting'})`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 ${
+                supabaseConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+              }`}
+            />
+            <Database className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden lg:inline max-w-[140px] truncate font-semibold">
+              Supabase: {supabaseConfig.projectId}
+            </span>
+            <span className="lg:hidden font-semibold">Supabase</span>
+            <button
+              onClick={() => pushToSupabase()}
+              disabled={isSyncing}
+              title="Push changes to Supabase now"
+              className="p-0.5 hover:opacity-75 rounded cursor-pointer transition-opacity"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+            </button>
+            <a
+              href={`https://supabase.com/dashboard/project/${supabaseConfig.projectId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open Supabase Project Dashboard"
+              className="p-0.5 hover:opacity-75 rounded cursor-pointer transition-opacity"
+            >
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+
           {/* Exam / Session pill */}
           <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-xs font-semibold">
             <Calendar className="w-3.5 h-3.5" />
@@ -145,6 +195,18 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Sync in progress / status bar */}
+      {(syncStatusMessage || syncError) && (
+        <div className={`mt-2 py-1 px-3 rounded-lg text-xs flex items-center justify-between transition-all ${
+          syncError ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-blue-50 text-blue-700 border border-blue-200'
+        }`}>
+          <div className="flex items-center gap-2">
+            {isSyncing && <RefreshCw className="w-3 h-3 animate-spin shrink-0" />}
+            <span>{syncError || syncStatusMessage}</span>
+          </div>
+        </div>
+      )}
     </header>
   );
 };

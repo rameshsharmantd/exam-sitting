@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { GraduationCap, Lock, User, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { GraduationCap, Lock, User, AlertCircle, CheckCircle2, Database } from 'lucide-react';
 import { CONFIG } from '../../data/constants';
+import { useSchool } from '../../context/SchoolContext';
 
 interface LoginViewProps {
-  onLogin: (username: string, pass: string) => { success: boolean; message?: string };
+  onLogin?: (username: string, pass: string) => { success: boolean; message?: string };
 }
 
 export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
+  const { login: contextLogin, supabaseConnected, supabaseConfig } = useSchool();
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('admin123');
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +25,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
 
     setIsLoading(true);
     setTimeout(() => {
-      const res = onLogin(username, password);
+      const loginFn = onLogin || contextLogin;
+      const res = loginFn(username, password);
       setIsLoading(false);
       if (!res.success) {
         setError(res.message || 'Invalid admin credentials.');
@@ -48,6 +51,19 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin }) => {
           <p className="text-xs text-slate-500 mt-1">
             Student & Examination Management System
           </p>
+        </div>
+
+        {/* Supabase backend status */}
+        <div className="mb-4 p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2 text-slate-700">
+            <Database className="w-4 h-4 text-emerald-600" />
+            <span className="font-medium">Supabase Database:</span>
+            <span className="font-mono text-[11px] text-emerald-800 font-bold">{supabaseConfig.projectId}</span>
+          </div>
+          <span className="flex items-center gap-1 text-[11px] text-emerald-700 font-semibold">
+            <span className={`w-1.5 h-1.5 rounded-full ${supabaseConnected ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            {supabaseConnected ? 'Ready' : 'Checking'}
+          </span>
         </div>
 
         {/* Error notification */}

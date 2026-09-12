@@ -93,6 +93,7 @@ const MainApp: React.FC = () => {
           defaultSession={settings.defaultSession}
           recentActivityCount={activityLogs.length}
           onViewActivity={() => setActiveSection('activityLog')}
+          onGoToSettings={() => setActiveSection('settings')}
         />
 
         {/* Scrollable Viewport */}

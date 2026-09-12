@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Settings, Save, RotateCcw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useSchool } from '../../context/SchoolContext';
 import { DEFAULT_SETTINGS } from '../../data/initialData';
+import { SupabaseDatabaseCard } from './SupabaseDatabaseCard';
 
 export const SettingsView: React.FC = () => {
   const { settings, updateSettings, resetAllData } = useSchool();
@@ -25,6 +26,10 @@ export const SettingsView: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {/* Cloud Database Integration Section */}
+      <SupabaseDatabaseCard />
+
+      {/* Institutional Settings Section */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-6">
         <div className="flex items-center justify-between pb-4 border-b border-slate-200">
           <div>

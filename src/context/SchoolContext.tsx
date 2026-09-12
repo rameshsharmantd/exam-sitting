@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { User } from 'firebase/auth';
 import {
   Student,
   Hall,
@@ -25,6 +26,19 @@ import {
   DEFAULT_EXAM_NOTES,
   DEFAULT_TIMETABLE_SUBJECTS
 } from '../utils/timetableUtils';
+import {
+  getSupabaseClient,
+  getCurrentSupabaseConfig,
+  getStoredSupabaseConfig,
+  saveStoredSupabaseConfig,
+  SupabaseConfig
+} from '../services/supabaseClient';
+import {
+  testSupabaseConnection,
+  pushAllToSupabase,
+  pullAllFromSupabase,
+  SchoolDatabasePayload
+} from '../services/supabaseService';
 
 interface SchoolContextType {
   // Auth
@@ -164,6 +178,18 @@ interface SchoolContextType {
   resetToDefaults: () => void;
   exportDataJSON: () => string;
   importDataJSON: (jsonStr: string) => { success: boolean; message?: string };
+
+  // Supabase Cloud Database
+  supabaseConfig: SupabaseConfig;
+  supabaseConnected: boolean;
+  isSyncing: boolean;
+  syncStatusMessage: string | null;
+  syncError: string | null;
+  lastSyncedAt: string | null;
+  updateSupabaseConfig: (config: SupabaseConfig) => Promise<boolean>;
+  pushToSupabase: () => Promise<{ success: boolean; message: string }>;
+  syncFromSupabase: () => Promise<{ success: boolean; message: string }>;
+  testConnection: () => Promise<boolean>;
 }
 
 const SchoolContext = createContext<SchoolContextType | undefined>(undefined);
@@ -192,7 +218,8 @@ const STORAGE_KEYS = {
   ACTIVITY_LOGS: 'sm_activity_logs',
   TIMETABLE: 'sm_timetable_entries',
   EXAM_NOTES: 'sm_exam_notes',
-  SUBJECTS: 'sm_subject_list'
+  SUBJECTS: 'sm_subject_list',
+  ACTIVE_SPREADSHEET: 'sm_active_spreadsheet'
 };
 
 export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -387,6 +414,77 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(subjectList));
   }, [subjectList]);
 
+  // Supabase Cloud Database state
+  const [supabaseConfig, setSupabaseConfig] = useState<SupabaseConfig>(() => getCurrentSupabaseConfig());
+  const [supabaseConnected, setSupabaseConnected] = useState<boolean>(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(() => {
+    return localStorage.getItem('sm_supabase_last_synced') || null;
+  });
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatusMessage, setSyncStatusMessage] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  // Check Supabase connectivity on mount & subscribe to realtime changes
+  useEffect(() => {
+    let isMounted = true;
+    const checkConnection = async () => {
+      try {
+        const res = await testSupabaseConnection();
+        if (isMounted) {
+          setSupabaseConnected(res.connected);
+          if (!res.connected) {
+            setSyncError(res.message);
+          }
+        }
+      } catch (err: any) {
+        if (isMounted) {
+          setSupabaseConnected(false);
+          setSyncError(err.message);
+        }
+      }
+    };
+
+    checkConnection();
+
+    // Subscribe to realtime changes on school_app_state table
+    try {
+      const supabase = getSupabaseClient();
+      const channel = supabase
+        .channel('school_db_sync')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'school_app_state' },
+          (payload: any) => {
+            if (payload.new && payload.new.data) {
+              const remote = payload.new.data as SchoolDatabasePayload;
+              if (remote.students) setStudents(remote.students);
+              if (remote.halls) setHalls(remote.halls);
+              if (remote.hallClassMaps) setHallClassMaps(remote.hallClassMaps);
+              if (remote.sittingPlans) setSittingPlans(remote.sittingPlans);
+              if (remote.attendanceRecords) setAttendanceRecords(remote.attendanceRecords);
+              if (remote.timeTableEntries) setTimeTableEntries(remote.timeTableEntries);
+              if (remote.settings) setSettings(prev => ({ ...prev, ...remote.settings }));
+              const now = new Date().toISOString();
+              setLastSyncedAt(now);
+              localStorage.setItem('sm_supabase_last_synced', now);
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        isMounted = false;
+        supabase.removeChannel(channel);
+      };
+    } catch (e) {
+      // Ignore if realtime fails
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Activity logger
   const logActivity = (action: string, studentId?: string, className?: string, details?: string) => {
     const newLog: ActivityLog = {
@@ -399,6 +497,134 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       details: details || ''
     };
     setActivityLogs(prev => [newLog, ...prev.slice(0, 199)]);
+  };
+
+  // Supabase Database Operations
+  const testConnection = async (): Promise<boolean> => {
+    setIsSyncing(true);
+    setSyncStatusMessage('Testing connection to Supabase...');
+    setSyncError(null);
+    try {
+      const res = await testSupabaseConnection();
+      setSupabaseConnected(res.connected);
+      if (res.connected) {
+        setSyncStatusMessage(res.message);
+        setTimeout(() => setSyncStatusMessage(null), 3000);
+        return true;
+      } else {
+        setSyncError(res.message);
+        return false;
+      }
+    } catch (err: any) {
+      setSupabaseConnected(false);
+      setSyncError(err.message || 'Supabase connection failed');
+      return false;
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const updateSupabaseConfig = async (newConfig: SupabaseConfig): Promise<boolean> => {
+    setIsSyncing(true);
+    setSyncStatusMessage('Updating Supabase credentials...');
+    setSyncError(null);
+    try {
+      getSupabaseClient(newConfig);
+      setSupabaseConfig(newConfig);
+      const res = await testSupabaseConnection();
+      setSupabaseConnected(res.connected);
+      if (res.connected) {
+        setSyncStatusMessage(`Successfully connected to ${newConfig.projectId}!`);
+        logActivity('SUPABASE_CONFIG_UPDATED', '', '', `Updated Supabase project: ${newConfig.projectId}`);
+        setTimeout(() => setSyncStatusMessage(null), 3000);
+        return true;
+      } else {
+        setSyncError(res.message);
+        return false;
+      }
+    } catch (err: any) {
+      setSyncError(err.message || 'Failed to update credentials');
+      return false;
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const pushToSupabase = async (): Promise<{ success: boolean; message: string }> => {
+    setIsSyncing(true);
+    setSyncStatusMessage('Writing records to Supabase PostgreSQL database...');
+    setSyncError(null);
+    try {
+      const payload: SchoolDatabasePayload = {
+        students,
+        halls,
+        hallClassMaps,
+        sittingPlans,
+        attendanceRecords,
+        timeTableEntries,
+        settings,
+        activityLogs
+      };
+
+      const res = await pushAllToSupabase(payload);
+      if (res.success) {
+        const now = new Date().toISOString();
+        setLastSyncedAt(now);
+        localStorage.setItem('sm_supabase_last_synced', now);
+        setSupabaseConnected(true);
+        setSyncStatusMessage('All records successfully pushed to Supabase!');
+        logActivity('SUPABASE_PUSH', '', '', `Pushed ${students.length} students & ${halls.length} halls to Supabase`);
+        setTimeout(() => setSyncStatusMessage(null), 3500);
+        return { success: true, message: res.message };
+      } else {
+        setSyncError(res.message);
+        return { success: false, message: res.message };
+      }
+    } catch (err: any) {
+      const msg = err.message || 'Failed to push records to Supabase';
+      setSyncError(msg);
+      return { success: false, message: msg };
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const syncFromSupabase = async (): Promise<{ success: boolean; message: string }> => {
+    setIsSyncing(true);
+    setSyncStatusMessage('Fetching latest records from Supabase...');
+    setSyncError(null);
+    try {
+      const res = await pullAllFromSupabase();
+      if (res.success && res.data) {
+        const data = res.data;
+        if (data.students && data.students.length > 0) setStudents(data.students);
+        if (data.halls && data.halls.length > 0) setHalls(data.halls);
+        if (data.hallClassMaps && data.hallClassMaps.length > 0) setHallClassMaps(data.hallClassMaps);
+        if (data.sittingPlans && Object.keys(data.sittingPlans).length > 0) setSittingPlans(data.sittingPlans);
+        if (data.attendanceRecords && data.attendanceRecords.length > 0) setAttendanceRecords(data.attendanceRecords);
+        if (data.timeTableEntries && data.timeTableEntries.length > 0) setTimeTableEntries(data.timeTableEntries);
+        if (data.settings) setSettings(prev => ({ ...prev, ...data.settings }));
+        if (data.activityLogs && data.activityLogs.length > 0) setActivityLogs(data.activityLogs);
+
+        const now = new Date().toISOString();
+        setLastSyncedAt(now);
+        localStorage.setItem('sm_supabase_last_synced', now);
+        setSupabaseConnected(true);
+        setSyncStatusMessage('Synchronized successfully with Supabase!');
+        logActivity('SUPABASE_PULL', '', '', 'Loaded latest records from Supabase');
+        setTimeout(() => setSyncStatusMessage(null), 3500);
+        return { success: true, message: res.message };
+      } else {
+        setSyncError(res.message);
+        return { success: false, message: res.message };
+      }
+    } catch (err: any) {
+      const msg = err.message || 'Failed to sync data from Supabase';
+      setSyncError(msg);
+      return { success: false, message: msg };
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   // Auth methods
@@ -1675,7 +1901,18 @@ export const SchoolProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         logActivity,
         resetToDefaults,
         exportDataJSON,
-        importDataJSON
+        importDataJSON,
+        // Supabase Cloud Database
+        supabaseConfig,
+        supabaseConnected,
+        isSyncing,
+        syncStatusMessage,
+        syncError,
+        lastSyncedAt,
+        updateSupabaseConfig,
+        pushToSupabase,
+        syncFromSupabase,
+        testConnection
       }}
     >
       {children}
